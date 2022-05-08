@@ -1,0 +1,331 @@
+---
+title: "Visualization of data"
+author: "Peian Lu"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(graphics)
+library(tibble)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(purrr)
+library(ggcorrplot)
+library(mlr)
+library(tidyverse)
+
+```
+
+### offline data main
+```{r}
+#data = read.csv( "C:/Users/85212/Desktop/Pro-Data/main.csv" ,header=TRUE) 
+data = read.csv("C:/Users/85212/Desktop/Pro-Data/online.csv", header=TRUE)
+#names(data) = c( 'Sample.Key',names(data)[-1] )
+#data = data[-1,]
+data= data[,-2]
+colnames(data)[1]='EFT..Hours'
+names(data)
+ac = read.csv( "C:/Users/85212/Desktop/Pro-Data/acids.csv" ,header=TRUE) 
+names(ac) = c( 'Date',names(ac)[-1] )
+```
+
+### join two sheets
+```{r}
+new = matrix(0, nrow = dim(data)[1] , ncol = 5 )
+new = as.data.frame( new )
+colnames(new) = c('EFT.acid', names(ac)[3:6] )
+counter = 0
+for (i in 1:dim(ac)[1] ) 
+{
+  eft = ac$EFT[i]
+  index = which.min(  abs( data$EFT.h -  eft)     ) 
+  if ( abs(data$EFT.h -  eft) != 0    )
+  {
+    counter = counter+1
+  }
+  new[index,] =  ac[i,2:6]
+}
+data = cbind(data,new)
+data=as.tibble(data)
+```
+
+### 229 records about acids. Only 126 are perfectly matched
+```{r}
+cover = data %>%
+  filter(data$EFT.acid!=0) %>%
+  select( c(3 , 21))  %>%
+  mutate( time.difference = EFT.h - EFT.acid)
+  
+sum(cover$time.difference==0)  
+summary( (cover$time.difference) )
+ggplot(cover ,aes (x = time.difference) ) +
+  geom_histogram( position = 'identity' )+
+  theme_bw()
+```
+
+```{r}
+#write.csv(data , file = "join_acids.csv" )
+```
+
+
+## Select those rows with acids records ( before interpolation )
+Most NA occur in  `DCW` and `offline.PH`
+
+```{r}
+data1  =   filter( data , EFT.acid != 0 ) %>% 
+  select( -c( Sample.Key , Timestamp , Operator , Nitrate.2..ppm.) ) %>%  
+  ##Most of #Nitrate.2..ppm. are NA
+  mutate_all( as.numeric)
+  
+dim(data1)
+#write.csv(data1, file = "filter_acids.csv")
+```
+
+
+
+
+## Imputation
+```{r}
+imputeMethod = imputeLearner("regr.rpart")
+data1Imp = impute(as.data.frame(data1), classes = list(numeric = imputeMethod) )
+
+```
+
+## Plot 
+```{r}
+data1_gather = gather(data1, key = "Variable",
+value = "Value", -c(  acetic  ) )
+ggplot(data1_gather, aes(Value, acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+```
+## Ridge regression
+```{r}
+ridgeTask = makeRegrTask(data = data1Imp$data, target = "acetic")
+ridge = makeLearner("regr.glmnet", alpha = 0, id = "ridge")
+```
+
+## Generating and plotting filter values
+```{r}
+filterVals = generateFilterValuesData(ridgeTask)
+plotFilterValues(filterVals) + theme_bw()
+```
+
+## Tuning
+```{r}
+ridgeParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 15))
+randSearch = makeTuneControlRandom(maxit = 200)
+cvForTuning = makeResampleDesc("RepCV", folds = 3, reps = 10)
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+tunedRidgePars = tuneParams(ridge, task = ridgeTask, resampling = cvForTuning,
+par.set = ridgeParamSpace, control = randSearch)
+parallelStop()
+```
+
+```{r}
+ridgeTuningData = generateHyperParsEffectData(tunedRidgePars)
+plotHyperParsEffect(ridgeTuningData, x = "s", y = "mse.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+## Training
+```{r}
+tunedRidge = setHyperPars(ridge, par.vals = tunedRidgePars$x)
+tunedRidgeModel = train(tunedRidge, ridgeTask)
+
+ridgeModelData = getLearnerModel(tunedRidgeModel)
+ridgeCoefs = coef(ridgeModelData, s = tunedRidgePars$x$s)
+ridgeCoefs
+
+lmCoefs = coef(lm(acetic ~ ., data = data1Imp$data))
+coefTib = tibble(Coef = rownames(ridgeCoefs)[-1],
+Ridge = as.vector(ridgeCoefs)[-1],
+Lm = as.vector(lmCoefs)[-1])
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", col = "black") +
+facet_wrap(~Model) +
+theme_bw() +
+theme(legend.position = "none")
+```
+# Lasso
+## Training
+```{r}
+lasso = makeLearner("regr.glmnet", alpha = 1, id = "lasso")
+lassoParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 15))
+parallelStartSocket(cpus = detectCores())
+tunedLassoPars = tuneParams(lasso, task = ridgeTask,
+resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+parallelStop()
+tunedLassoPars
+```
+```{r}
+lassoTuningData = generateHyperParsEffectData(tunedLassoPars)
+plotHyperParsEffect(lassoTuningData, x = "s", y = "mse.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+
+```{r}
+tunedLasso = setHyperPars(lasso, par.vals = tunedLassoPars$x)
+tunedLassoModel = train(tunedLasso, ridgeTask)
+lassoModelData = getLearnerModel(tunedLassoModel)
+lassoCoefs = coef(lassoModelData, s = tunedLassoPars$x$s)
+lassoCoefs
+```
+## Plot
+```{r}
+coefTib$LASSO = as.vector(lassoCoefs)[-1]
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", col = "black") +
+facet_wrap(~ Model) +
+theme_bw() +
+theme(legend.position = "none")
+```
+# Elastic net model
+```{r}
+elastic = makeLearner("regr.glmnet", id = "elastic")
+elasticParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 10),
+makeNumericParam("alpha", lower = 0, upper = 1))
+randSearchElastic = makeTuneControlRandom(maxit = 400)
+parallelStartSocket(cpus = detectCores())
+tunedElasticPars = tuneParams(elastic, task = ridgeTask,
+resampling = cvForTuning,
+par.set = elasticParamSpace,
+control = randSearchElastic)
+parallelStop()
+tunedElasticPars
+```
+## Plot
+```{r}
+elasticTuningData = generateHyperParsEffectData(tunedElasticPars)
+plotHyperParsEffect(elasticTuningData, x = "s", y = "alpha",
+z = "mse.test.mean", interpolate = "regr.kknn",
+plot.type = "heatmap") +
+scale_fill_gradientn(colours = terrain.colors(5)) +
+geom_point(x = tunedElasticPars$x$s, y = tunedElasticPars$x$alpha,
+col = "white") +
+theme_bw()
+```
+
+## Training with best parameters
+```{r}
+tunedElastic = setHyperPars(elastic, par.vals = tunedElasticPars$x)
+tunedElasticModel = train(tunedElastic, ridgeTask)
+```
+
+## Plotting the model parameters
+```{r}
+elasticModelData = getLearnerModel(tunedElasticModel)
+elasticCoefs = coef(elasticModelData, s = tunedElasticPars$x$s)
+coefTib$Elastic = as.vector(elasticCoefs)[-1]
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", position = "dodge", col = "black") +
+facet_wrap(~ Model) +
+theme_bw()
+```
+
+# Benchmarking ridge, LASSO, elastic net, and OLS
+## Plot
+```{r}
+ridgeWrapper = makeTuneWrapper(ridge, resampling = cvForTuning,
+par.set = ridgeParamSpace,
+control = randSearch)
+lassoWrapper = makeTuneWrapper(lasso, resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+elasticWrapper = makeTuneWrapper(elastic, resampling = cvForTuning,
+par.set = elasticParamSpace,
+control = randSearchElastic)
+learners = list(ridgeWrapper, lassoWrapper, elasticWrapper, "regr.lm")
+
+kFold3 = makeResampleDesc("CV", iters = 3)
+parallelStartSocket(cpus = detectCores())
+bench = benchmark(learners, ridgeTask, kFold3)
+parallelStop()
+bench
+```
+## Refit regression by variables selected by Lasso
+```{r}
+Coef = as.numeric( lassoCoefs)
+index = which(Coef!=0)[-c(1)]  ## remove EFT.h EFT.acid and intercept
+variables = rownames(lassoCoefs)[index]
+print(variables)
+names(data1)[index-1]
+reg = lm(acetic~.,   data1Imp$data[, index-1] )
+summary(reg)
+CoefReg = coef(reg)
+plot(reg)
+
+```
+
+## Box-cox 
+```{r}
+library(MASS)
+epsilon = 1e-4
+boxData1 =   data1Imp$data[ , index - 1 ]
+zeroRow = which( data1Imp$data$acetic ==0)  
+boxData1$acetic[zeroRow] = boxData1$acetic[zeroRow] + epsilon
+
+b = boxcox( acetic ~. , data= boxData1  , plotit = F)
+trans = b$x[ which.max(b$y) ]
+
+boxCoxReg = lm(  acetic^trans ~. ,   data= data1Imp$data[, index - 1 ] )
+summary(boxCoxReg)
+plot(boxCoxReg)
+
+```
+
+
+
+
+
+<!-- # Load online data  -->
+<!-- ```{r} -->
+<!-- data = read.csv( file.choose() ,header=TRUE)  -->
+<!-- names(data) = c( 'EFT(Hours)',names(data)[-1] ) -->
+<!-- data = data[,1:77] -->
+<!-- data = data[complete.cases(data),] -->
+<!-- ``` -->
+
+<!-- ## Turn into tibble -->
+<!-- ```{r} -->
+<!-- a = as_tibble(data)  -->
+<!-- a= a[,-2] -->
+<!-- copy = a -->
+<!-- head(a) -->
+<!-- ``` -->
+<!-- ## Correlation  -->
+<!-- ```{r} -->
+<!-- summary(a) -->
+<!-- #na_index = apply(is.na(a),2,sum) -->
+
+<!-- corr = round( cor(as.matrix(a) ) , 2)  -->
+<!-- colnames(corr) = names(a) -->
+<!-- ``` -->
+<!-- ## Distributions of varialbes -->
+<!-- ```{r} -->
+<!-- ggplot(a) + geom_histogram(aes(x=total.air.flow)) -->
+<!-- plot(a$harvest.flow) -->
+<!-- ``` -->
+
