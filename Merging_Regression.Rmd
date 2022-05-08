@@ -1,0 +1,363 @@
+---
+title: "With_Cubic_Interpolation"
+author: "Peian Lu"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(graphics)
+library(tibble)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(purrr)
+library(ggcorrplot)
+library(mlr)
+library(tidyverse)
+
+```
+
+### offline data main
+```{r}
+#data = read.csv( "C:/Users/85212/Desktop/Pro-Data/main.csv" ,header=TRUE) 
+data = read.csv("C:/Users/85212/Desktop/Pro-Data/online.csv", header=TRUE)
+#names(data) = c( 'Sample.Key',names(data)[-1] )
+#data = data[-1,]
+data= data[,-2]
+colnames(data)[1]='EFT..Hours'
+names(data)
+ac = read.csv( "C:/Users/85212/Desktop/Pro-Data/acids.csv" ,header=TRUE) 
+names(ac) = c( 'Date',names(ac)[-1] )
+```
+
+
+## Merging by Cubic Spline Interpolation
+```{r}
+x = ac$EFT
+y = ac$acetic
+x_out = data$EFT..Hours
+interpolated_acetic = spline(x = x ,y = y , xout = x_out )
+data1 = cbind(data, interpolated_acetic$y) %>% filter( EFT..Hours < 360)
+```
+
+## Plot 
+```{r}
+
+plot( Interpolated_acetic$x,  Interpolated_acetic$y , type ='p', pch='.' ,col = 1 , xlab = 'EFT' , ylab = 'acetic' , main='Plot of interpolated values')
+points(ac$EFT , ac$acetic,col=2)
+legend("topright", inset=.05, c('Interpolation',"Real"),lty=c(1, 1), pch=c(1, 1), col=c(1, 2))
+
+```
+
+```{r}
+dim(data1)
+dim( as.data.frame( data1[complete.cases(data1) ,] )   )
+```
+
+
+## Pre-process
+```{r}
+colnames(data1)[68] = 'interpolated_acetic' 
+data1 =  data1[complete.cases(data1) ,]
+data1$interpolated_acetic[ which(data1$interpolated_acetic < 0 )] = 0
+remove_col = c()
+for (j in 1:dim(data1)[2] )
+{
+  if (  mean(data1[,j]) < 0.01 | min(data1[,j])  == mean(data1[,j])  )
+  remove_col = c(remove_col , j)
+  else
+  {
+    wrong_row = which(data1[,j] < 0 )
+    data1[wrong_row , j] = 0
+  }
+  
+}
+data1 = data1[,-remove_col]
+summary(data1)
+```
+
+## Imputation
+```{r}
+imputeMethod = imputeLearner("regr.rpart")
+data1Imp = impute(as.data.frame(data1), classes = list(numeric = imputeMethod) )
+
+```
+
+## Plot 
+```{r}
+data1_gather = gather(data1[,c(1:10,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(11:20,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+data1_gather = gather(data1[,c(21:30,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(31:40,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(41:50,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(51:60,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(61:67,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+```
+
+# Setting Task
+```{r}
+AceticTask = makeRegrTask(data = data1Imp$data, target = "interpolated_acetic")
+```
+
+
+## Features importance by random forest
+```{r}
+filterVals = generateFilterValuesData(AceticTask, method = "randomForest_importance")
+plotFilterValues(filterVals , n.show = 7) + 
+theme_bw()
+```
+
+
+## Generating and plotting filter values by correlation
+```{r}
+filterVals = generateFilterValuesData(AceticTask)
+plotFilterValues(filterVals , n.show = 6) + theme_bw()
+```
+## GLM
+```{r}
+gamTask = makeRegrTask(data = data1Imp$data, target = "interpolated_acetic")
+
+imputeMethod = imputeLearner("regr.rpart")
+gamImputeWrapper = makeImputeWrapper("regr.gamboost")
+
+gamFeatSelControl = makeFeatSelControlSequential(method = "sfbs")
+kFold = makeResampleDesc("CV", iters = 2)
+
+gamFeatSelWrapper = makeFeatSelWrapper(learner = gamImputeWrapper,
+resampling = kFold,
+control = gamFeatSelControl)
+```
+## CV
+```{r}
+Holdout = makeResampleDesc("Holdout")
+gamCV = resample(gamFeatSelWrapper, gamTask, resampling = Holdout)
+gamCV
+```
+## Training
+```{r}
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+gamModel = train(gamFeatSelWrapper, gamTask)
+parallelStop()
+gamModelData = getLearnerModel(gamModel, more.unwrap = TRUE)
+```
+
+# Lasso
+## Training
+```{r}
+lasso = makeLearner("regr.glmnet", alpha = 1, id = "lasso")
+lassoParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 15))
+
+parallelStartSocket(cpus = detectCores())
+
+cvForTuning = makeResampleDesc("RepCV", folds = 10, reps = 3)
+randSearch = makeTuneControlRandom(maxit = 200)
+
+tunedLassoPars = tuneParams(lasso, task = AceticTask,
+resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+parallelStop()
+tunedLassoPars
+```
+
+```{r}
+lassoTuningData = generateHyperParsEffectData(tunedLassoPars)
+plotHyperParsEffect(lassoTuningData, x = "s", y = "mse.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+
+```{r}
+tunedLasso = setHyperPars(lasso, par.vals = tunedLassoPars$x)
+tunedLassoModel = train(tunedLasso, AceticTask)
+lassoModelData = getLearnerModel(tunedLassoModel)
+lassoCoefs = coef(lassoModelData, s = tunedLassoPars$x$s)
+lassoCoefs
+```
+## Plot
+```{r}
+coefTib = tibble(Coef = colnames(data1)[-1] )
+
+coefTib$LASSO <- as.vector(lassoCoefs)[-1]
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", col = "black") +
+facet_wrap(~ Model) +
+theme_bw() +
+theme(legend.position = "none")
+```
+# Elastic net model
+```{r}
+elastic = makeLearner("regr.glmnet", id = "elastic")
+elasticParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 10),
+makeNumericParam("alpha", lower = 0, upper = 1))
+randSearchElastic = makeTuneControlRandom(maxit = 400)
+parallelStartSocket(cpus = detectCores())
+tunedElasticPars = tuneParams(elastic, task = AceticTask,
+resampling = cvForTuning,
+par.set = elasticParamSpace,
+control = randSearchElastic)
+parallelStop()
+tunedElasticPars
+```
+## Plot
+```{r}
+elasticTuningData = generateHyperParsEffectData(tunedElasticPars)
+plotHyperParsEffect(elasticTuningData, x = "s", y = "alpha",
+z = "mse.test.mean", interpolate = "regr.kknn",
+plot.type = "heatmap") +
+scale_fill_gradientn(colours = terrain.colors(5)) +
+geom_point(x = tunedElasticPars$x$s, y = tunedElasticPars$x$alpha,
+col = "white") +
+theme_bw()
+```
+
+## Training with best parameters
+```{r}
+tunedElastic = setHyperPars(elastic, par.vals = tunedElasticPars$x)
+tunedElasticModel = train(tunedElastic, AceticTask)
+```
+
+## Plotting the model parameters
+```{r}
+elasticModelData = getLearnerModel(tunedElasticModel)
+elasticCoefs = coef(elasticModelData, s = tunedElasticPars$x$s)
+coefTib$Elastic = as.vector(elasticCoefs)[-1]
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", position = "dodge", col = "black") +
+facet_wrap(~ Model) +
+theme_bw()
+```
+
+# Benchmarking ridge, LASSO, elastic net, and OLS
+
+## Plot
+```{r}
+# ridgeWrapper = makeTuneWrapper(ridge, resampling = cvForTuning,
+# par.set = ridgeParamSpace,
+# control = randSearch)
+lassoWrapper = makeTuneWrapper(lasso, resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+
+elasticWrapper = makeTuneWrapper(elastic, resampling = cvForTuning,
+par.set = elasticParamSpace,
+control = randSearchElastic)
+
+learners = list(elasticWrapper, lassoWrapper, "regr.lm") # elasticWrapper,ridgeWrapper
+
+kFold3 = makeResampleDesc("CV", iters = 2)
+parallelStartSocket(cpus = detectCores())
+bench = benchmark(learners, AceticTask, kFold3)
+parallelStop()
+bench
+```
+## Refit regression by variables selected by Lasso
+```{r}
+Coef = as.numeric( lassoCoefs)
+index = which(Coef!=0)[-c(1)]  ## remove EFT.h EFT.acid and intercept
+variables = rownames(lassoCoefs)[index]
+print(variables)
+names(data1)[index-1]
+reg = lm(interpolated_acetic~., data1Imp$data[, c(index-1,68)] )
+summary(reg)
+CoefReg = coef(reg)
+plot(reg)
+
+pred = predict(reg , data1Imp$data[, c(index-1,68)])
+pred[ which(pred<0)    ] = 0
+
+plot(pred, (data1[,68] - pred ) , xlab = 'fitted_value' , ylab = 'residuals', main = 'residual plot with correction')
+plot(data1$EFT..Hours , pred , xlab='ETF',ylab='acetic value' , col = 2 , pch = 2)
+points(data1$EFT..Hours , data1$interpolated_acetic , type='p' , col = 1 , pch = 1)
+legend("topright", cex = 0.8, c('fitted values',"real values"),lty=c(1, 1), pch=c(2, 1), col=c(2, 1))
+
+```
+## Lm stepwise
+```{r}
+lmstep = step( lm(interpolated_acetic~., data = data1)   ) 
+plot(lmstep)
+
+pred_step = predict(lmstep ,  data1 )
+pred_step[ which(pred_step<0)    ] = 0
+
+plot(pred_step, (data1[,68] - pred ) , xlab = 'fitted_value' , ylab = 'residuals', main = 'residual plot with correction')
+plot(data1$EFT..Hours , pred_step , xlab='ETF',ylab='acetic value' , col = 2 , pch = 2 , main = 'with step_wise model')
+points(data1$EFT..Hours , data1$interpolated_acetic , type='p' , col = 1 , pch = 1)
+legend("topright", cex = 0.8, c('fitted values',"real values"),lty=c(1, 1), pch=c(2, 1), col=c(2, 1))
+```
+
+## Box-cox 
+```{r}
+library(MASS)
+epsilon = 1e-4
+boxData1 =   data1Imp$data[ , c(index - 1,68) ]
+zeroRow = which( data1Imp$data$interpolated_acetic ==0)  
+boxData1$interpolated_acetic[zeroRow] = boxData1$interpolated_acetic[zeroRow] + epsilon
+
+b = boxcox( interpolated_acetic ~. , data= boxData1  , plotit = F)
+trans = b$x[ which.max(b$y) ]
+
+boxCoxReg = lm(  interpolated_acetic^trans ~. ,   data= data1Imp$data[ , c(index - 1,68) ] )
+summary(boxCoxReg)
+plot(boxCoxReg)
+
+```
+
