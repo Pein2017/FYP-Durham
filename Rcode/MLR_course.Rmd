@@ -1,0 +1,1170 @@
+---
+title: "Tidyverse"
+author: "Peian Lu"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Chapter 2
+
+```{r}
+#install.packages(c("tibble", "dplyr", "ggplot2", "tidyr", "purrr"))
+library(tibble)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(purrr)
+
+```
+
+##Creating tibbles with the tibble() function works the same as creating
+data frames:
+
+```{r}
+myTib <- tibble(x = 1:4,
+y = c("london", "beijing", "las vegas", "berlin"))
+```
+
+TIP When printing a tibble, <int> denotes an integer variable, <chr>
+denotes a character variable, <dbl> denotes a floating-point number
+(decimal), and <lgl> denotes a logical variable.
+
+## Converting existing data frames into tibbles
+
+```{r}
+myDf <- data.frame(x = 1:4,
+y = c("london", "beijing", "las vegas", "berlin"))
+dfToTib <- as_tibble(myDf)
+```
+
+## DPLYR
+
+ Selecting only the rows and/or columns of interest  Creating new
+variables  Arranging the data in ascending or descending order of
+certain variables  Getting summary statistics
+
+### Select In the select() function call in the following listing, the
+
+first argument is the data; then we supply either the numbers or names
+of the columns we wish to select, separated by commas.
+
+```{r}
+library(tibble)
+data(CO2)
+CO2tib <- as_tibble(CO2)
+
+library(dplyr)
+selectedData <- select(CO2tib, 1, 2, 3, 5)
+selectedData
+```
+
+### Filter ( by some conditions, similar to which)
+
+```{r}
+filteredData <- filter(selectedData, uptake > 16)
+filteredData
+```
+
+### Group by
+
+```{r}
+groupedData <- group_by(filteredData, Plant)
+groupedData
+```
+
+### Summarize
+
+```{r}
+summarizedData <- summarize(groupedData, meanUp = mean(uptake),
+sdUp = sd(uptake))
+summarizedData
+```
+
+### Mutate
+
+```{r}
+mutatedData <- mutate(summarizedData, CV = (sdUp / meanUp) * 100)
+mutatedData
+```
+
+### Arrange(Similar to order() )
+
+```{r}
+arrangedData <- arrange(mutatedData, CV)  
+arrangedData
+arrange(mutatedData, desc(CV) )
+```
+
+## Pipeline operator %\>%
+
+```{r}
+arrangedData <- CO2tib %>%
+select(c(1:3, 5)) %>%
+filter(uptake > 16) %>%
+group_by(Plant) %>%
+summarize(meanUp = mean(uptake), sdUp = sd(uptake)) %>%
+mutate(CV = (sdUp / meanUp) * 100) %>%
+arrange(CV)
+arrangedData
+```
+
+## GGplot
+
+The function ggplot() takes the **data** you supply as the **first
+argument** and the function `aes()` as the **second** (more about this
+in a moment). This creates a plotting environment, axis, and axis labels
+based on the data
+
+```{r}
+library(ggplot2)
+data(iris)
+myPlot <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
+geom_point() +
+theme_bw()
+myPlot
+
+```
+
+`NOTE` When adding layers to the initial ggplot() function call, each
+line needs to finish with +; you cannot put the + on a new line.
+
+###Adding geom layers to a ggplot object
+
+```{r}
+myPlot +
+geom_density_2d() +
+geom_smooth()
+```
+
+### Mapping species to the shape and color aesthetics
+
+```{r}
+
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, shape = Species)) +
+geom_point() +
+theme_bw()
+
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, col = Species)) +
+geom_point() +
+theme_bw()
+```
+
+### Grouping subplots with the **facet_wrap()** function
+
+```{r}
+ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
+facet_wrap(~ Species) +
+geom_point() +
+theme_bw()
+```
+
+## purrr
+
+`NOTE` When a function **does something other than return a value**
+(such as draw a plot or alter an environment), it's called a **side
+effect** of the function. A function that does not produce any side
+effects is said to be a **pure function**.
+
+```{r}
+a <- 20
+pure <- function() {
+a <- a + 1
+a
+}
+side_effect <- function() {
+a <<- a + 1  ##   must be <<-
+a
+}
+c(pure(), pure())
+
+c(side_effect(), side_effect())
+```
+
+### Replacing for loops with map()
+
+```{r}
+listOfNumerics <- list(a = rnorm(5),
+b = rnorm(9),
+c = rnorm(10))
+```
+
+Now, let's say we want to apply a function to each of the three list
+elements separately, such as the **length()** function to return the
+length of each element.
+
+```{r}
+elementLengths <- vector("list", length = 3)
+for(i in seq_along(listOfNumerics)) {
+elementLengths[[i]] <- length(listOfNumerics[[i]])
+}
+elementLengths
+```
+
+```{r}
+map(listOfNumerics, length)
+```
+
+`NOTE` If you're familiar with the apply family of functions, map() is
+the purrr equivalent of lapply().
+
+### Returning an atomic vector instead of a list
+
+ map_dbl() returns a vector of doubles (decimals).  map_chr() returns
+a character vector.  map_int() returns a vector of integers. 
+map_lgl() returns a logical vector.
+
+```{r}
+map_int(listOfNumerics, length)
+
+map_chr(listOfNumerics, length)
+```
+
+Finally, we can use the map_df() function to return a tibble instead of
+a list.
+
+```{r}
+map_df(listOfNumerics, length)
+```
+
+### Defining an anonymous function with function()
+
+```{r}
+map(listOfNumerics, function(.) sort(.) )
+## or 
+map(listOfNumerics, ~. + 2)
+
+```
+
+### Using walk() to produce a function's side effects
+
+```{r}
+par(mfrow = c(1, 3))
+walk(listOfNumerics, hist)
+
+```
+
+\*\* we can use .x to reference the list element we're iterating over
+and .y to reference its name/index \*\*
+
+```{r}
+par(mfrow = c(1, 3))
+iwalk(listOfNumerics, ~hist(.x, main = .y))
+```
+
+### Iterating over multiple lists simultaneously map2() pairwise operation
+
+```{r}
+multipliers <- list(0.5, 10, 3)
+map2(.x = listOfNumerics, .y = multipliers, ~.x * .y)   
+## pairwise product
+```
+
+### Using pmap() to iterate over multiple lists
+
+```{r}
+arguments <- expand.grid(n = c(50,100),
+mean = c(1, 10),
+sd = c(1, 10))
+arguments
+
+par(mfrow = c(2, 4))
+pmap(arguments, rnorm) %>%
+iwalk(~hist(.x, main = paste("Element", .y)))
+```
+
+# Classification
+
+```{r}
+#install.packages("mlr", dependencies = TRUE)
+library(mlr)
+library(tidyverse)
+```
+
+```{r}
+data(diabetes, package = "mclust")
+diabetesTib <- as_tibble(diabetes)
+summary(diabetesTib)
+```
+
+```{r}
+ggplot(diabetesTib, aes(glucose, insulin, col = class)) +
+geom_point() +
+theme_bw()
+ggplot(diabetesTib, aes(sspg, insulin, col = class)) +
+geom_point() +
+theme_bw()
+ggplot(diabetesTib, aes(sspg, glucose, col = class)) +
+geom_point() +
+theme_bw()
+```
+
+## Using mlr to train your first kNN model
+
+Building a machine learning model with the mlr package has three main
+stages: 1. `Define the task`. The task consists of the data and what we
+want to do with it. In this case, the data is diabetesTib, and we want
+to classify the data with the class variable as the target variable. 2.
+`Define the learner`. The learner is simply the name of the algorithm we
+plan to use, along with any additional arguments the algorithm accepts.
+3. `Train the model`. This stage is what it sounds like: you pass the
+task to the learner, and the learner generates a model that you can use
+to make future predictions.
+
+##Telling mlr what we're trying to achieve: Defining the task
+
+```{r}
+diabetesTask <- makeClassifTask(data = diabetesTib, target = "class")
+
+```
+
+## Telling mlr which algorithm to use: Defining the learner
+
+The components needed to define a learner are as follows:  The class of
+algorithm we are using: -- "classif." for classification -- "regr." for
+regression -- "cluster." for clustering -- "surv." and "multilabel." for
+predicting survival and multilabel classification, which I won't
+discuss  The algorithm we are using  Any additional options we may
+wish to use to control the algorithm
+
+We use the `makeLearner()` function to define a learner.
+
+```{r}
+knn <- makeLearner("classif.knn", par.vals = list("k" = 2))
+```
+
+## Putting it all together: Training the model
+
+```{r}
+knnModel <- train(knn, diabetesTask)
+knnPred <- predict(knnModel, newdata = diabetesTib)
+
+```
+
+```{r}
+performance(knnPred, measures = list(mmce, acc))
+
+```
+
+## Using cross-validation to tell if we're overfitting or underfitting
+
+### Cross-validating our kNN model
+
+```{r}
+diabetesTask <- makeClassifTask(data = diabetesTib, target = "class")
+knn <- makeLearner("classif.knn", par.vals = list("k" = 2))
+```
+
+### MAKING A HOLDOUT RESAMPLING DESCRIPTION
+
+```{r}
+holdout <- makeResampleDesc(method = "Holdout", split = 2/3,
+stratify = TRUE)
+```
+
+`stratify = TRUE`. It asks the function to balance dependent varialbes
+
+### PERFORMING HOLDOUT CV
+
+```{r}
+holdoutCV <- resample(learner = knn, task = diabetesTask,
+resampling = holdout, measures = list(mmce, acc))
+```
+
+### CALCULATING A CONFUSION MATRIX
+
+```{r}
+# relative asks the function to show the proportion of each class in the true and
+# predicted class labels
+calculateConfusionMatrix(holdoutCV$pred, relative = TRUE) 
+```
+
+### K-fold cross-validation
+
+Next, we tell the function that we want to repeat the 10-fold CV 50
+times with the reps argument. This gives us `500` performance measures
+to average across! Again, we ask for the classes to be stratified among
+the folds:
+
+```{r}
+kFold <- makeResampleDesc(method = "RepCV", folds = 10, reps = 50,
+stratify = TRUE)
+kFoldCV <- resample(learner = knn, task = diabetesTask,
+resampling = kFold, measures = list(mmce, acc))
+kFoldCV$aggr
+
+calculateConfusionMatrix(kFoldCV$pred, relative = TRUE)
+```
+
+### Leave-one-out cross-validation
+
+```{r}
+LOO <- makeResampleDesc(method = "LOO")
+LOOCV <- resample(learner = knn, task = diabetesTask, resampling = LOO,
+measures = list(mmce, acc))
+LOOCV$aggr
+calculateConfusionMatrix(LOOCV$pred, relative = TRUE)
+
+```
+
+## Tuning k to improve the model
+
+```{r}
+knnParamSpace <- makeParamSet(makeDiscreteParam("k", values = 1:10))
+
+gridSearch <- makeTuneControlGrid()
+
+cvForTuning <- makeResampleDesc("RepCV", folds = 10, reps = 20)
+
+```
+
+```{r}
+
+tunedK <- tuneParams("classif.knn", task = diabetesTask,
+resampling = cvForTuning,
+par.set = knnParamSpace, control = gridSearch)
+
+```
+
+```{r}
+tunedK
+tunedK$x
+```
+
+### visualize the tuning process
+
+```{r}
+knnTuningData <- generateHyperParsEffectData(tunedK)
+plotHyperParsEffect(knnTuningData, x = "k", y = "mmce.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+
+```{r}
+tunedKnn <- setHyperPars(makeLearner("classif.knn"),
+par.vals = tunedK$x)
+tunedKnnModel <- train(tunedKnn, diabetesTask)
+tunedKnnModel
+```
+
+# Regressioin
+
+## Build first model
+
+```{r}
+data(Ozone, package = "mlbench")
+ozoneTib <- as_tibble(Ozone)
+names(ozoneTib) <- c("Month", "Date", "Day", "Ozone", "Press_height",
+"Wind", "Humid", "Temp_Sand", "Temp_Monte",
+"Inv_height", "Press_grad", "Inv_temp", "Visib")
+ozoneTib
+```
+
+### clean data
+
+```{r}
+ozoneClean <- mutate_all(ozoneTib, as.numeric) %>%
+filter(is.na(Ozone) == FALSE)
+ozoneClean
+```
+
+### plot
+
+```{r}
+ozoneUntidy <- gather(ozoneClean, key = "Variable",
+value = "Value", -Ozone)
+ggplot(ozoneUntidy, aes(Value, Ozone)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth() +
+geom_smooth(method = "lm", col = "red") +
+theme_bw()
+```
+
+### Using rpart to impute missing values
+
+```{r}
+imputeMethod <- imputeLearner("regr.rpart")
+ozoneImp <- impute(as.data.frame(ozoneClean),
+classes = list(numeric = imputeMethod))
+```
+
+### Defining our task and learne
+
+Use *makeRegrTask()* and *makeClusterTask()* to specify task
+
+```{r}
+ozoneTask <- makeRegrTask(data = ozoneImp$data, target = "Ozone")
+lin <- makeLearner("regr.lm")
+```
+
+## Feature selection
+
+### THE FILTER METHOD FOR FEATURE SELECTION
+
+ Linear correlation---When both predictor and outcome are continuous 
+ANOVA---When the predictor is categorical and the outcome is continuous
+ Chi-squared---When both the predictor and outcome are continuous 
+Random forest importance---Can be used whether the predictors and
+outcomes are categorical or continuous (the default)
+
+### Using a filter method for feature selection
+
+```{r}
+filterVals <- generateFilterValuesData(ozoneTask,
+method = "linear.correlation")
+arrange(filterVals$data , desc(value ) )
+plotFilterValues(filterVals) + theme_bw()
+```
+
+```{r}
+#ozoneFiltTask <- filterFeatures(ozoneTask,
+# fval = filterVals, abs = 6)
+#ozoneFiltTask <- filterFeatures(ozoneTask,
+# fval = filterVals, per = 0.25)
+#ozoneFiltTask <- filterFeatures(ozoneTask,
+# fval = filterVals, threshold = 0.2)
+```
+
+### Creating a filter wrapper
+
+Still filter method!!!
+
+```{r}
+filterWrapper = makeFilterWrapper(learner = lin,
+fw.method = "linear.correlation" )
+```
+
+### Tuning the number of predictors to retain
+
+```{r}
+lmParamSpace <- makeParamSet(
+makeIntegerParam("fw.abs", lower = 1, upper = 12)
+)
+gridSearch <- makeTuneControlGrid()
+kFold <- makeResampleDesc("CV", iters = 10)
+tunedFeats <- tuneParams(filterWrapper, task = ozoneTask, resampling = kFold,
+par.set = lmParamSpace, control = gridSearch)
+tunedFeats
+```
+
+### Training the model with filtered features
+
+```{r}
+filteredTask <- filterFeatures(ozoneTask, fval = filterVals,
+abs = unlist(tunedFeats$x) )
+filteredModel <- train(lin, filteredTask)
+```
+
+### Wrapper method
+
+### Using a wrapper method for feature selection
+
+```{r}
+featSelControl <- makeFeatSelControlSequential(method = "sfbs")
+selFeats <- selectFeatures(learner = lin, task = ozoneTask,
+resampling = kFold, control = featSelControl)
+selFeats
+```
+
+### Using a wrapper method for feature selection
+
+```{r}
+ozoneSelFeat <- ozoneImp$data[, c("Ozone", selFeats$x)]
+ozoneSelFeatTask <- makeRegrTask(data = ozoneSelFeat, target = "Ozone")
+wrapperModel <- train(lin, ozoneSelFeatTask)
+```
+
+## Combining imputation and feature selection wrappers
+
+```{r}
+imputeMethod <- imputeLearner("regr.rpart")
+imputeWrapper <- makeImputeWrapper(lin,
+classes = list(numeric = imputeMethod))
+featSelWrapper <- makeFeatSelWrapper(learner = imputeWrapper,
+resampling = kFold,
+control = featSelControl)
+```
+
+```{r}
+library(parallel)
+library(parallelMap)
+```
+
+### Cross-validating the model-building process
+
+```{r}
+ozoneTaskWithNAs <- makeRegrTask(data = ozoneClean, target = "Ozone")
+kFold3 <- makeResampleDesc("CV", iters = 3)
+parallelStartSocket(cpus = detectCores())
+lmCV <- resample(featSelWrapper, ozoneTaskWithNAs, resampling = kFold3)
+parallelStop()
+lmCV
+```
+
+The cross-validation process proceeds like this: 1 Split the data into
+three folds. 2 For each fold: a Use the rpart algorithm to impute the
+missing values. b Perform feature selection: Update template to support
+more than two levels of nested ordered lists. c Use a selection method
+(such as backward search) to select combinations of features to train
+models on. d Use 10-fold cross-validation to evaluate the performance of
+each model. 3 Return the best-performing model for each of the three
+outer folds. 4 Return the mean MSE to give us our estimate of
+performance. \## Interpreting the model \### Interpreting
+
+```{r}
+wrapperModelData <- getLearnerModel(wrapperModel)
+summary(wrapperModelData)
+```
+
+### Creating diagnostic plots of the model
+
+```{r}
+par(mfrow = c(2, 2))
+plot(wrapperModelData)
+par(mfrow = c(1, 1))
+```
+
+The Scale-Location plot helps us identify heteroscedasticity of the
+residuals. There should be no patterns here, but it looks like the
+residuals are increasingly varied with larger predicted values,
+suggesting heteroscedasticity. Finally, the Residuals vs. Leverage plot
+helps us to identify cases that have excessive influence on the model
+parameters (potential outliers). Cases that fall inside a dotted region
+of the plot called Cook's distance may be outliers whose inclusion or
+exclusion makes a large difference to the model. Because we can't even
+see Cook's distance here (it is beyond the axis limits), we have no
+worries about outliers.
+
+# Nonlinear regression with generalized additive models
+
+## Building your first GAM
+
+interaction(1:4, c("a", "b", "c", "d")) \### Creating an interaction
+between Date and Month
+
+```{r}
+ozoneForGam <- mutate(ozoneClean,
+DayOfYear = as.numeric(interaction(Date, Month))) %>%
+dplyr::select(c(-"Date", -"Month"))
+ggplot(ozoneForGam, aes(DayOfYear, Ozone)) +
+geom_point() +
+geom_smooth() +
+theme_bw()
+```
+
+### Defining the task and wrappers
+
+```{r}
+gamTask <- makeRegrTask(data = ozoneForGam, target = "Ozone")
+imputeMethod <- imputeLearner("regr.rpart")
+gamImputeWrapper <- makeImputeWrapper("regr.gamboost",
+classes = list(numeric = imputeMethod))
+gamFeatSelControl <- makeFeatSelControlSequential(method = "sfbs")
+kFold <- makeResampleDesc("CV", iters = 2)
+gamFeatSelWrapper <- makeFeatSelWrapper(learner = gamImputeWrapper,
+resampling = kFold,
+control = gamFeatSelControl)
+```
+
+### Cross-validating the GAM model-building process
+
+```{r}
+holdout <- makeResampleDesc("Holdout")
+gamCV <- resample(gamFeatSelWrapper, gamTask, resampling = holdout)
+gamCV
+```
+
+### Training a GAM
+
+```{r}
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+gamModel <- train(gamFeatSelWrapper, gamTask)
+parallelStop()
+gamModelData <- getLearnerModel(gamModel, more.unwrap = TRUE)
+```
+
+### Plotting our GAM
+
+```{r}
+par(mfrow = c(3, 3))
+plot(gamModelData, type = "l")
+plot(gamModelData$fitted(), resid(gamModelData))
+qqnorm(resid(gamModelData))
+qqline(resid(gamModelData))
+par(mfrow = c(1, 1))
+
+```
+```{r}
+filterWrapperImp <- makeFilterWrapper(learner = gamImputeWrapper,
+                                   fw.method = "linear.correlation")
+
+filterParam <- makeParamSet(
+  makeIntegerParam("fw.abs", lower = 1, upper = 12)
+)
+
+gridSearch <- makeTuneControlGrid()
+
+tuneWrapper <- makeTuneWrapper(learner = filterWrapperImp,
+                               resampling = kFold,
+                               par.set = filterParam,
+                               control = gridSearch)
+
+filterGamCV <- resample(tuneWrapper, gamTask, resampling = holdout)
+
+filterGamCV
+```
+
+## Strengths and weaknesses of GAMs
+
+While it often isn't easy to tell which algorithms will perform well for
+a given task, here are some strengths and weaknesses that will help you
+decide whether GAMs will perform well for you. The strengths of GAMs
+are as follows:  They produce models that are very interpretable,
+despite being nonlinear.  They can handle both continuous and
+categorical predictors.  They can automatically learn nonlinear
+relationships in the data. 
+
+The weaknesses of GAMs are these:  They
+still make strong assumptions about the data, such as homoscedasticity
+and the distribution of residuals (performance may suffer if these are
+violated).  GAMs have a propensity to overfit the training set.  GAMs
+can be particularly poor at predicting data outside the range of values
+of the training set.  They cannot handle missing data.
+
+# Preventing overfitting with ridge regression, LASSO, and elastic net
+
+## Building your first ridge, LASSO, and elastic net models \###
+Loading and exploring the Iowa dataset
+
+```{r}
+data(Iowa, package = "lasso2")
+iowaTib <- as_tibble(Iowa)
+iowaTib
+```
+
+### Plotting the data
+
+```{r}
+iowaUntidy <- gather(iowaTib, "Variable", "Value", -Yield)
+ggplot(iowaUntidy, aes(Value, Yield)) +
+facet_wrap(~ Variable, scales = "free_x") +
+geom_point() +
+geom_smooth(method = "lm") +
+theme_bw()
+```
+
+## Training the ridge regression model We also supply an argument that
+
+you haven't seen before: `id`. The id argument just lets us supply a
+unique name to every learner. The reason we need this now is that later
+in the chapter, we're going to benchmark our ridge, LASSO, and elastic
+net learners against each other. Because we create each of these with
+the same glmnet function, we'll get an error because they won't each
+have a unique identifier.
+
+```{r}
+iowaTask <- makeRegrTask(data = iowaTib, target = "Yield")
+ridge <- makeLearner("regr.glmnet", alpha = 0, id = "ridge")
+```
+
+### Generating and plotting filter values
+
+```{r}
+filterVals <- generateFilterValuesData(iowaTask)
+plotFilterValues(filterVals) + theme_bw()
+```
+
+### Tuning the lambda (s) hyperparameter
+
+```{r}
+ridgeParamSpace <- makeParamSet(
+makeNumericParam("s", lower = 0, upper = 15))
+randSearch <- makeTuneControlRandom(maxit = 200)
+cvForTuning <- makeResampleDesc("RepCV", folds = 3, reps = 10)
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+tunedRidgePars <- tuneParams(ridge, task = iowaTask,
+resampling = cvForTuning,
+par.set = ridgeParamSpace,
+control = randSearch)
+parallelStop()
+```
+
+### Plotting the hyperparameter tuning process
+
+```{r}
+ridgeTuningData <- generateHyperParsEffectData(tunedRidgePars)
+plotHyperParsEffect(ridgeTuningData, x = "s", y = "mse.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+
+### Training a ridge regression model using the tuned lambda
+
+```{r}
+tunedRidge <- setHyperPars(ridge, par.vals = tunedRidgePars$x)
+tunedRidgeModel <- train(tunedRidge, iowaTask)
+```
+
+### Extracting the model parameters
+
+```{r}
+ridgeModelData <- getLearnerModel(tunedRidgeModel)
+ridgeCoefs <- coef(ridgeModelData, s = tunedRidgePars$x$s)
+ridgeCoefs
+```
+
+### Plotting the model parameters
+
+See the shrinkage effect
+
+```{r}
+lmCoefs <- coef(lm(Yield ~ ., data = iowaTib))
+coefTib <- tibble(Coef = rownames(ridgeCoefs)[-1],
+Ridge = as.vector(ridgeCoefs)[-1],
+Lm = as.vector(lmCoefs)[-1])
+coefUntidy <- gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", col = "black") +
+facet_wrap(~Model) +
+theme_bw() +
+theme(legend.position = "none")
+```
+
+## Training the LASSO model
+
+### Tuning lambda for LASSO
+
+```{r}
+lasso <- makeLearner("regr.glmnet", alpha = 1, id = "lasso")
+lassoParamSpace <- makeParamSet(
+makeNumericParam("s", lower = 0, upper = 15))
+parallelStartSocket(cpus = detectCores())
+tunedLassoPars <- tuneParams(lasso, task = iowaTask,
+resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+parallelStop()
+tunedLassoPars
+```
+
+### Plotting the hyperparameter tuning process
+
+```{r}
+lassoTuningData <- generateHyperParsEffectData(tunedLassoPars)
+plotHyperParsEffect(lassoTuningData, x = "s", y = "mse.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+
+### Training a LASSO model using the tuned lambda
+
+```{r}
+tunedLasso <- setHyperPars(lasso, par.vals = tunedLassoPars$x)
+tunedLassoModel <- train(tunedLasso, iowaTask)
+```
+
+### Extracting the model parameters
+
+```{r}
+lassoModelData <- getLearnerModel(tunedLassoModel)
+lassoCoefs <- coef(lassoModelData, s = tunedLassoPars$x$s)
+lassoCoefs
+```
+
+### Plotting the model parameters
+
+```{r}
+coefTib$LASSO <- as.vector(lassoCoefs)[-1]
+coefUntidy <- gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", col = "black") +
+facet_wrap(~ Model) +
+theme_bw() +
+theme(legend.position = "none")
+
+```
+
+## Training the elastic net model
+
+### Tuning lambda and alpha for elastic net
+
+```{r}
+elastic <- makeLearner("regr.glmnet", id = "elastic")
+elasticParamSpace <- makeParamSet(
+makeNumericParam("s", lower = 0, upper = 10),
+makeNumericParam("alpha", lower = 0, upper = 1))
+randSearchElastic <- makeTuneControlRandom(maxit = 400)
+parallelStartSocket(cpus = detectCores())
+tunedElasticPars <- tuneParams(elastic, task = iowaTask,
+resampling = cvForTuning,
+par.set = elasticParamSpace,
+control = randSearchElastic)
+parallelStop()
+tunedElasticPars
+
+```
+
+### Plotting the tuning process
+
+```{r}
+elasticTuningData <- generateHyperParsEffectData(tunedElasticPars)
+plotHyperParsEffect(elasticTuningData, x = "s", y = "alpha",
+z = "mse.test.mean", interpolate = "regr.kknn",
+plot.type = "heatmap") +
+scale_fill_gradientn(colours = terrain.colors(5)) +
+geom_point(x = tunedElasticPars$x$s, y = tunedElasticPars$x$alpha,
+col = "white") +
+theme_bw()
+```
+
+### Training an elastic net model using tuned hyperparameters
+
+```{r}
+tunedElastic <- setHyperPars(elastic, par.vals = tunedElasticPars$x)
+tunedElasticModel <- train(tunedElastic, iowaTask)
+```
+
+### Plotting the model parameters
+
+```{r}
+elasticModelData <- getLearnerModel(tunedElasticModel)
+elasticCoefs <- coef(elasticModelData, s = tunedElasticPars$x$s)
+coefTib$Elastic <- as.vector(elasticCoefs)[-1]
+coefUntidy <- gather(coefTib, key = Model, value = Beta, -Coef)
+ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
+geom_bar(stat = "identity", position = "dodge", col = "black") +
+facet_wrap(~ Model) +
+theme_bw()
+```
+
+## Benchmarking ridge, LASSO, elastic net, and OLS against each other
+
+###Plotting the model parameters
+
+```{r}
+ridgeWrapper <- makeTuneWrapper(ridge, resampling = cvForTuning,
+par.set = ridgeParamSpace,
+control = randSearch)
+lassoWrapper <- makeTuneWrapper(lasso, resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+elasticWrapper <- makeTuneWrapper(elastic, resampling = cvForTuning,
+par.set = elasticParamSpace,
+control = randSearchElastic)
+learners = list(ridgeWrapper, lassoWrapper, elasticWrapper, "regr.lm")
+
+```
+
+### Plotting the model parameters
+
+```{r}
+library(parallel)
+library(parallelMap)
+kFold3 <- makeResampleDesc("CV", iters = 3)
+parallelStartSocket(cpus = detectCores())
+bench <- benchmark(learners, iowaTask, kFold3)
+parallelStop()
+bench
+```
+
+
+
+
+
+# Regression with KNN, random forest and XGBoost
+## KNN
+
+```{r}
+library(mlr)
+library(tidyverse)
+data("fuelsubset.task")
+fuel <- getTaskData(fuelsubset.task)
+fuelTib <- as_tibble(fuel)
+fuelTib
+
+fuelUntidy <- fuelTib %>%
+mutate(id = 1:nrow(.)) %>%
+gather(key = "variable", value = "absorbance",
+c(-heatan, -h20, -id)) %>%
+mutate(spectrum = str_sub(variable, 1, 3),
+wavelength = as.numeric(str_extract(variable, "(\\d)+")))
+fuelUntidy
+
+```
+### Plotting the data
+```{r}
+fuelUntidy %>%
+ggplot(aes(absorbance, heatan, col = as.factor(wavelength))) +
+facet_wrap(~ spectrum, scales = "free_x") +
+geom_smooth(se = FALSE, size = 0.2) +
+ggtitle("Absorbance vs heatan for each wavelength") +
+theme_bw() +
+theme(legend.position = "none")
+fuelUntidy %>%
+ggplot(aes(wavelength, absorbance, group = id, col = heatan)) +
+facet_wrap(~ spectrum, scales = "free_x") +
+geom_smooth(se = FALSE, size = 0.2) +
+ggtitle("Wavelength vs absorbance for each batch") +
+theme_bw()
+fuelUntidy %>%
+ggplot(aes(h20, heatan)) +
+geom_smooth(se = FALSE) +
+ggtitle("Humidity vs heatan") +
+theme_bw()
+```
+
+### Defining the task and kNN learner
+```{r}
+#library('kknn')
+fuelTask <- makeRegrTask(data = fuelTib, target = "heatan")
+kknn <- makeLearner("regr.kknn")
+```
+### Tuning K
+```{r}
+kknnParamSpace <- makeParamSet(makeDiscreteLearnerParam("k", values = 1:12))
+gridSearch <- makeTuneControlGrid()
+kFold <- makeResampleDesc("CV", iters = 10)
+tunedK <- tuneParams(kknn, task = fuelTask,
+resampling = kFold,
+par.set = kknnParamSpace,
+control = gridSearch)
+tunedK
+```
+### Plot the tune process
+```{r}
+knnTuningData <- generateHyperParsEffectData(tunedK)
+plotHyperParsEffect(knnTuningData, x = "k", y = "mse.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+### Training with `setHyperPars()` function
+```{r}
+tunedKnn <- setHyperPars(makeLearner("regr.kknn"), par.vals = tunedK$x)
+tunedKnnModel <- train(tunedKnn, fuelTask)
+```
+
+
+### Building your first random forest regression model
+```{r}
+forest <- makeLearner("regr.randomForest")
+```
+ `ntree` controls the number of individual trees to train. More trees is usually better until adding more doesn’t improve performance further
+ `mtry` controls the number of predictor variables that are randomly sampled for
+each individual tree. Training each individual tree on a random selection of predictor variables helps keep the trees uncorrelated and therefore helps prevent the ensemble model from overfitting the training set.
+ `nodesize` defines the minimum number of cases allowed in a leaf node. For
+example, setting nodesize equal to 1 would allow each case in the training set
+to have its own leaf.
+ `maxnodes` defines the maximum number of nodes in each individual tree.
+
+### Hyperparameter Tuning for random forest 
+```{r}
+forestParamSpace <- makeParamSet(
+makeIntegerParam("ntree", lower = 50, upper = 50),
+makeIntegerParam("mtry", lower = 100, upper = 367),
+makeIntegerParam("nodesize", lower = 1, upper = 10),
+makeIntegerParam("maxnodes", lower = 5, upper = 30))
+randSearch <- makeTuneControlRandom(maxit = 100)
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+tunedForestPars <- tuneParams(forest, task = fuelTask,
+resampling = kFold,
+par.set = forestParamSpace,
+control = randSearch)
+parallelStop()
+tunedForestPars
+```
+### Training the model and plotting the out-of-bag error 
+It’s a good idea to extract the model information and pass this to the plot() function to plot the `out-of-bag error`. Recall from chapter 8 that the out-of-bag error is the mean prediction error for each case by trees that did not include that case in their bootstrap sample.
+```{r}
+tunedForest <- setHyperPars(forest, par.vals = tunedForestPars$x)
+tunedForestModel <- train(tunedForest, fuelTask)
+forestModelData <- getLearnerModel(tunedForestModel)
+plot(forestModelData)
+```
+It looks like the out-of-bag error `stabilizes` after 30–40 bagged trees, so we can be satisfied that we have included enough trees in our forest. 
+## Building your first XGBoost regression model
+```{r}
+xgb <- makeLearner("regr.xgboost")
+```
+ `eta` is known as the learning rate. It takes a value between 0 and 1, which is multiplied by the model weight of each tree to slow down the learning process to prevent overfitting.
+ `gamma` is the minimum amount of splitting by which a node must improve the
+loss function (MSE in the case of regression).
+ `max_depth` is the maximum number of levels deep that each tree can grow.
+ `min_child_weight` is the minimum degree of impurity needed in a node before
+attempting to split it (if a node is pure enough, don’t try to split it again).
+ `subsample` is the proportion of cases to be randomly sampled (without replacement) for each tree. Setting this to 1 uses all the cases in the training set.
+ `colsample_bytree` is the proportion of predictor variables sampled for each
+tree. We could also tune colsample_bylevel and colsample_bynode, which
+instead sample predictors for each level of depth in a tree and at each node,
+respectively.
+ `nrounds` is the number of sequentially built trees in the model.
+
+### Hyperparameter tuning for XGBoost
+```{r}
+
+xgbParamSpace <- makeParamSet(
+makeNumericParam("eta", lower = 0, upper = 1),
+makeNumericParam("gamma", lower = 0, upper = 10),
+makeIntegerParam("max_depth", lower = 1, upper = 20),
+makeNumericParam("min_child_weight", lower = 1, upper = 10),
+makeNumericParam("subsample", lower = 0.5, upper = 1),
+makeNumericParam("colsample_bytree", lower = 0.5, upper = 1),
+makeIntegerParam("nrounds", lower = 30, upper = 30))
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+tunedXgbPars <- tuneParams(xgb, task = fuelTask,
+resampling = kFold,
+par.set = xgbParamSpace,
+control = randSearch)
+parallelStop()
+tunedXgbPars
+
+```
+### Training the model and plotting RMSE against tree number
+```{r}
+tunedXgb <- setHyperPars(xgb, par.vals = tunedXgbPars$x)
+tunedXgbModel <- train(tunedXgb, fuelTask)
+xgbModelData <- getLearnerModel(tunedXgbModel)
+ggplot(xgbModelData$evaluation_log, aes(iter, train_rmse)) +
+geom_line() +
+geom_point() +
+theme_bw()
+```
+We can see that 30 iterations/`trees` is just about enough for the RMSE to have flattened out (including more iterations won’t result in a better model).
+## Benchmarking the kNN, random forest, and XGBoost model-building processes
+### Benchmarking kNN, random forest, and XGBoost
+Using the parallelMap package won’t help because we’re training XGBoost models as part of the benchmark, and XGBoost works fastest if you allow it to perform its own internal parallelization.
+```{r}
+kknnWrapper <- makeTuneWrapper(kknn, resampling = kFold,
+par.set = kknnParamSpace,
+control = gridSearch)
+forestWrapper <- makeTuneWrapper(forest, resampling = kFold,
+par.set = forestParamSpace,
+control = randSearch)
+xgbWrapper <- makeTuneWrapper(xgb, resampling = kFold,
+par.set = xgbParamSpace,
+control = randSearch)
+learners = list(kknnWrapper, forestWrapper, xgbWrapper)
+holdout <- makeResampleDesc("Holdout")
+
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+bench <- benchmark(learners, fuelTask, holdout)
+parallelStop()
+bench
+```
+

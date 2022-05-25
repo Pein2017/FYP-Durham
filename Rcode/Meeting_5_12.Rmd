@@ -1,0 +1,452 @@
+---
+title: "Meeting_5_12"
+author: "Peian Lu"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Define a color function(ignored)
+
+```{r echo=FALSE}
+colFmt = function(x,color){
+  outputFormat = knitr::opts_knit$get("rmarkdown.pandoc.to")
+  if(outputFormat == 'latex')
+    paste("\\textcolor{",color,"}{",x,"}",sep="")
+  else if(outputFormat == 'html')
+    paste("<font color='",color,"'>",x,"</font>",sep="")
+  else
+    x
+}
+
+```
+
+### Loading packages
+
+```{r}
+library(parallel)
+library(parallelMap)
+library(graphics)
+library(tibble)
+library(ggplot2)
+library(ggcorrplot)
+library(mlr)
+library(BBmisc)
+library(tidyr)
+library(randomForestSRC)
+
+```
+
+# Pre-processing
+
+## Dealing with offline dataset
+
+```{r}
+### offline data main
+data = read.csv("C:/Users/85212/Desktop/Pro-Data/online.csv", header=TRUE)
+data= data[,-2] ## removing Date_time
+colnames(data)[1]='EFT..Hours' ## Rename EFT
+names(data)
+ac = read.csv( "C:/Users/85212/Desktop/Pro-Data/acids.csv" ,header=TRUE)
+#names(ac) = c( 'Date',names(ac)[-1] )
+
+```
+
+## Merging by Cubic Spline Interpolation. Selecting 'ramp up' phrase, named by $\color{red}{\text{data1}}$
+
+```{r}
+x = ac$EFT
+y = ac$acetic
+x_out = data$EFT..Hours
+interpolated_acetic = spline(x = x ,y = y , xout = x_out )
+data1 = cbind(data, interpolated_acetic=interpolated_acetic$y)
+data1 = dplyr:: filter( data1 , EFT..Hours < 360)
+```
+
+### Removing constant and negative values
+
+```{r}
+data1 =  data1[complete.cases(data1) ,]
+data1$interpolated_acetic[ which(data1$interpolated_acetic < 0 )] = 0
+remove_col = c()
+for (j in 1:dim(data1)[2] )
+{
+  if (  mean(data1[,j]) < 0.01 | min(data1[,j])  == mean(data1[,j])  )
+  remove_col = c(remove_col , j)
+  else
+  {
+    wrong_row = which(data1[,j] < 0 )
+    data1[wrong_row , j] = 0
+  }
+  
+}
+data1 = data1[,-remove_col]
+summary(data1)
+```
+
+### Imputation
+
+```{r eval=FALSE}
+imputeMethod = imputeLearner("regr.rpart")
+data1Imp = impute(as.data.frame(data1), classes = list(numeric = imputeMethod) )
+```
+
+# Plot
+
+## Individual Plot
+
+```{r}
+data1_gather = gather(data1[,c(1:10,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(11:20,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+data1_gather = gather(data1[,c(21:30,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(31:40,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(41:50,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(51:60,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+data1_gather = gather(data1[,c(61:67,68)], key = "Variable",
+value = "Value", -c(  interpolated_acetic  ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+```
+
+# Building Lasso
+
+## Define Task
+
+```{r}
+task = makeRegrTask( data1, target = "interpolated_acetic" , id = 'lasso')
+print(task)
+```
+
+## Features importance by random forest
+
+```{r}
+filterVals = generateFilterValuesData(task , method = "randomForest_importance")
+plotFilterValues(filterVals , n.show = 5) + 
+theme_bw()
+```
+
+## Generating and plotting filter values by correlation
+
+```{r}
+filterVals = generateFilterValuesData(task)
+plotFilterValues(filterVals , n.show = 6) + theme_bw()
+```
+
+### Pre-required function (ignored)
+
+#### Fix data for leaner
+
+```{r eval=FALSE, echo=TRUE}
+getTrainingInfo = function(x) {
+   attr(x$learner.model, "mlr.train.info") # attr(x, "mlr.train.info") 
+}
+
+attachTrainingInfo = function(x, info) {
+  attr(x, "mlr.train.info") = info
+  x
+}
+
+getFixDataInfo = function(data, restore.levels = FALSE, factors.to.dummies = FALSE, ordered.to.int = FALSE) {
+
+  cl = vcapply(data, getClass1)
+  factors = lapply(data[cl == "factor"], levels)
+  ordered = lapply(data[cl == "ordered"], levels)
+
+  makeS3Obj("FixDataInfo",
+    factors = factors,
+    ordered = ordered,
+    restore.levels = restore.levels,
+    factors.to.dummies = factors.to.dummies && length(factors) > 0L,
+    ordered.to.int = ordered.to.int && length(ordered) > 0L
+  )
+}
+
+fixDataForLearner = function(data, info) {
+
+  cn = c(names(info$factors), names(info$ordered))
+  not.found = which.first(cn %nin% names(data))
+  if (length(not.found) > 0L) {
+    stopf("Column '%s' found in info, but not in new data", cn[not.found])
+  }
+
+  if (info$restore.levels) {
+    if (!info$factors.to.dummies && length(info$factors) > 0L) {
+      cols = names(info$factors)
+      data[cols] = Map(factor, x = data[cols], levels = info$factors)
+    }
+    if (!info$ordered.to.int && length(info$ordered) > 0L) {
+      cols = names(info$ordered)
+      data[cols] = Map(factor, x = data[cols], levels = info$ordered, ordered = TRUE)
+    }
+  }
+
+  if (info$factors.to.dummies) {
+    cols = names(info$factors)
+    new.cols = Map(function(x, lvls) {
+      as.data.frame(setNames(lapply(lvls, "==", x), lvls))
+    }, x = data[cols], lvls = info$factors)
+    data = cbind(dropNamed(data, cols), do.call(cbind, new.cols))
+  }
+
+  if (info$ordered.to.int) {
+    cols = names(info$ordered)
+    data[cols] = lapply(data[cols], as.integer)
+  }
+
+  data
+}
+```
+
+#### Define New learner
+
+```{r eval=FALSE, echo=TRUE}
+makeRLearner.regr.trunc.lasso = function() {
+  makeRLearnerRegr(
+    cl = "regr.trunc.lasso",
+    package = "glmnet",
+     par.set = makeParamSet(
+      makeDiscreteLearnerParam(id = "family", values = c("gaussian", "poisson"), default =       "gaussian"),
+      makeNumericLearnerParam(id = "alpha", default = 1, lower = 0, upper = 1),
+      makeNumericLearnerParam(id = "s", lower = 0, when = "predict")
+    ),
+    properties = c("numerics"),
+    par.vals = list(s = 0.01),
+    name = "GLM with Lasso or Elasticnet Regularization",
+    short.name = "glmnet",
+    callees = c("glmnet", "glmnet.control", "predict.glmnet")
+  )
+}
+
+trainLearner.regr.trunc.lasso = function (.learner, .task, .subset,  ...) 
+{
+  d = getTaskData(.task, .subset, target.extra = TRUE)
+  info = getFixDataInfo(d$data, factors.to.dummies = TRUE, ordered.to.int = TRUE)
+  args = c(list(x = as.matrix(fixDataForLearner(d$data, info)), y = d$target), list(...))
+  glmnet::glmnet.control(factory = TRUE)
+  saved.ctrl = glmnet::glmnet.control()
+  is.ctrl.arg = names(args) %in% names(saved.ctrl)
+  if (any(is.ctrl.arg)) {
+    on.exit(glmnet::glmnet.control(factory = TRUE))
+    do.call(glmnet::glmnet.control, args[is.ctrl.arg])
+    args = args[!is.ctrl.arg]
+  }
+  attachTrainingInfo(do.call(glmnet::cv.glmnet, args), info)
+}
+
+predictLearner.regr.trunc.lasso = function (.learner, .model, .newdata , ...) 
+{
+  info = getTrainingInfo(.model)
+  .newdata = as.matrix(fixDataForLearner(.newdata, info))
+   mins = .model$learner.model$lambda.min
+   print(mins)
+   p = predict(.model$learner.model, newx = .newdata, s = mins)
+   index = which( p < 0)
+   p[index] = 0
+   return ( as.vector(p) )
+}
+```
+
+getLearnerParamSet(makeLearner("regr.glmnet"))
+
+class(makeLearner(cl = "regr.trunc.lasso"))
+
+## Training
+
+### With truncation
+
+```{r}
+parallelStartSocket(cpus = detectCores())
+parallelLibrary("mlr")
+parallelLibrary("BBmisc")
+parallelSource("new_learner_support.R")
+lasso = makeLearner("regr.trunc.lasso", alpha = 1, id = "lasso" )
+lassoParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 1))
+
+cvForTuning = makeResampleDesc("RepCV", folds = 5, reps = 2)
+randSearch = makeTuneControlRandom(maxit = 200)
+
+tunedLassoPars = tuneParams(lasso, task = task,
+resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+parallelStop()
+tunedLassoPars
+```
+
+```{r}
+lassoTuningData = generateHyperParsEffectData(tunedLassoPars)
+plotHyperParsEffect(lassoTuningData, x = "s", y = "mse.test.mean",
+plot.type = "line") +
+theme_bw()
+```
+### With truncation
+```{r}
+lasso_normal = makeLearner("regr.glmnet", alpha = 1, id = "lasso")
+tunedLasso = setHyperPars(lasso_normal, par.vals = list(s = 0.09358278) )
+tunedLassoModel = train(tunedLasso, task)
+lassoModelData = getLearnerModel(tunedLassoModel)
+lassoCoefs = coef(lassoModelData, s = 0.09358278)
+pred = predict(tunedLassoModel, task)
+index = which(pred$data$response < 0)
+pred$data$response[index] = 0
+plot( pred$data$response ,(pred$data$truth-pred$data$response) , xlab = 'fitted values' , ylab='residuals')
+lassoCoefs
+```
+
+
+
+### Without truncation
+
+```{r}
+lasso_normal = makeLearner("regr.glmnet", alpha = 1, id = "lasso")
+tunedLasso = setHyperPars(lasso_normal, par.vals = list(s = 0.09358278) )
+tunedLassoModel = train(tunedLasso, task)
+lassoModelData = getLearnerModel(tunedLassoModel)
+lassoCoefs = coef(lassoModelData, s = 0.09358278)
+pred = predict(tunedLassoModel, task)
+index = which(pred$data$response < 0)
+pred$data$response[index] = 0
+plot( pred$data$response ,(pred$data$truth-pred$data$response) , xlab = 'fitted values' , ylab='residuals')
+lassoCoefs
+```
+
+# Refit lasso by Linear Regression
+
+## Get coefficients
+
+In lasso without truncation, s = 0.09358278. Otherwise, s = 2.57 with search range {0,10} and s = 0.8545604 with range{0.1}. mean absolute error is 1.140247 when s = 0.09 mean absolute error is 0.6319 when s = 0.85 ?
+
+```{r}
+pred = predict(tunedLassoModel, task)
+index = which(pred$data$response < 0)
+pred$data$response[index] = 0
+plot( pred$data$response ,(pred$data$truth-pred$data$response) , xlab = 'fitted values' , ylab='residuals' , main = 'lasso without truncation')
+Mean_Error_lasso = mean(  abs(pred$data$truth-pred$data$response)  )  
+cat('mean absolute error: ', Mean_Error_lasso)
+```
+
+## Refit regression by variables selected by Lasso
+
+```{r}
+Coef = as.numeric( lassoCoefs)
+index = which(Coef!=0)[-c(1)]  ## remove EFT.h EFT.acid and intercept
+variables = rownames(lassoCoefs)[index]
+print(variables)
+names(data1)[index-1]
+reg = lm(interpolated_acetic~., data1[, c(index-1,68)] )
+summary(reg)
+CoefReg = coef(reg)
+plot(reg)
+
+pred = predict(reg , data1[, c(index-1,68)])
+pred[ which(pred<0)    ] = 0
+
+plot(pred, (data1[,68] - pred ) , xlab = 'fitted_value' , ylab = 'residuals', main = 'residual plot with correction')
+plot(data1$EFT..Hours , pred , xlab='ETF',ylab='acetic value' , col = 2 , pch = 2)
+points(data1$EFT..Hours , data1$interpolated_acetic , main = 'with correction' , type='p' , col = 1 , pch = 1 )
+legend("topright", cex = 0.8, c('fitted values',"real values"),lty=c(1, 1), pch=c(2, 1), col=c(2, 1))
+Mean_Error_refit_lasso = mean(  abs( pred - data1$interpolated_acetic)  )  
+cat('mean absolute error of refitted-lasso: ', Mean_Error_lasso)
+
+```
+
+### stepwise based on refitted-lasso
+
+```{r}
+refit_lasso_step = step( reg )
+cat('before stepwise selection, R-squared for refitted lasso is: ', summary(reg)$r.squared)
+cat('after stepwise selection, R-squared for refitted lasso is: ', summary(refit_lasso_step)$r.squared)
+```
+
+## Lm stepwise
+
+```{r}
+lmstep = step( lm(interpolated_acetic~., data = data1)   ) 
+plot(lmstep)
+
+pred_step = predict(lmstep ,  data1 )
+pred_step[ which(pred_step<0)    ] = 0
+
+plot(pred_step, (data1[,68] - pred_step ) , xlab = 'fitted_value' , ylab = 'residuals', main = 'residual plot with correction')
+plot(data1$EFT..Hours , pred_step , xlab='ETF',ylab='acetic value' , col = 2 , pch = 2 , main = 'with step_wise model')
+points(data1$EFT..Hours , data1$interpolated_acetic , type='p' , col = 1 , pch = 1)
+legend("topright", cex = 0.8, c('fitted values',"real values"),lty=c(1, 1), pch=c(2, 1), col=c(2, 1))
+
+plot(data1$EFT..Hours , (data1[,68] - pred_step ) , xlab = 'EFT' , ylab = 'residuals' , main ='residuals VS EFT')
+abline(h = c(1,-1) , col = 'red')
+abline(v = c(25,125,175,200,320) , col = 'blue')
+cat('for step-lm, R-squared is: ', summary(lmstep)$r.squared)
+
+Mean_Error_step = mean(  abs( pred_step - data1$interpolated_acetic)  )  
+cat('mean absolute error of step-lm: ', Mean_Error_step)
+cat('mean absolute error of refitted-lasso: ', Mean_Error_lasso)
+
+```
+
+## Box-cox
+
+```{r}
+library(MASS)
+epsilon = 1e-4
+boxData1 =   data1[ , c(index - 1,68) ]
+zeroRow = which( data1$interpolated_acetic ==0)  
+boxData1$interpolated_acetic[zeroRow] = boxData1$interpolated_acetic[zeroRow] + epsilon
+
+b = boxcox( interpolated_acetic ~. , data= boxData1  , plotit = F)
+trans = b$x[ which.max(b$y) ]
+
+boxCoxReg = lm(  interpolated_acetic^trans ~. ,   data= data1[ , c(index - 1,68) ] )
+summary(boxCoxReg)
+plot(boxCoxReg)
+```

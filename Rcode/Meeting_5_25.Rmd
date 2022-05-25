@@ -1,0 +1,88 @@
+---
+title: "relation_between_organic_acids"
+author: "Peian Lu"
+date: '2022-05-25'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### offline data main
+```{r}
+#data = read.csv( "C:/Users/85212/Desktop/Pro-Data/main.csv" ,header=TRUE) 
+data = read.csv("C:/Users/85212/Desktop/Pro-Data/online.csv", header=TRUE)
+#names(data) = c( 'Sample.Key',names(data)[-1] )
+#data = data[-1,]
+data= data[,-2]
+colnames(data)[1]='EFT..Hours'
+#names(data)
+ac = read.csv( "C:/Users/85212/Desktop/Pro-Data/acids.csv" ,header=TRUE) 
+#names(ac) = c( 'Date',names(ac)[-1] )
+ac = dplyr:: filter( ac , EFT < 360)
+data = dplyr:: filter( data , EFT..Hours < 360)
+```
+
+## Merging by Cubic Spline Interpolation
+```{r}
+x = ac$EFT
+y = ac$Acc.rate.acetic
+x_out = data$EFT..Hours
+interpolated__acc_acetic = spline(x = x ,y = y , xout = x_out )
+interpolated__acc_formic = spline( x = x , y = ac$Acc.rate.formic , xout = x_out)
+data1 = cbind(data,  interpolated_formic = interpolated__acc_formic$y , interpolated__acc_acetic=interpolated__acc_acetic$y ) 
+# data1 = dplyr:: filter( data1 , EFT..Hours < 360)
+index = which( names(data1) == 'headspace.pressure')
+data1 = data1[,-index]  ## remove constant headspace.pressure
+names(data1)
+```
+
+## Pre-process
+```{r}
+data1 =  data1[complete.cases(data1) ,]
+#data1$interpolated_acc_acetic[ which(data1$interpolated__acc_acetic < 0 )] = 0
+remove_col = c()
+for (j in 1:(ncol(data1)-2) ) 
+{
+  if (  mean(data1[,j]) < 0.01 | min(data1[,j])  == mean(data1[,j])  )
+  remove_col = c(remove_col , j)
+  else
+  {
+    wrong_row = which(data1[,j] < 0 )
+    data1[wrong_row , j] = 0
+  }
+  
+}
+data1 = data1[,-remove_col]
+#summary(data1)
+```
+
+## Correlation 
+### Since the P-value of cor.test is high, we should accept null hypothesis and conclude that they are `independent` 
+```{r}
+cor.test( ac$formic , ac$acetic )
+summary(  lm(ac$formic~ac$acetic ) )
+plot( ac$formic , ac$acetic , col = 3 , main = 'formic VS acetic, seems to be independent')
+plot( ac$EFT , ac$acetic, main = 'acid values' , col = 1 , ylab = 'acids '  )
+points( ac$EFT , ac$formic , col = 2 )
+legend("topright", inset=.05, c('acetic','formic'),lty=c(1, 1), pch=c(1, 1), col=c(1, 2))
+
+plot( ac$EFT , ac$Acc.rate.acetic, col = 1 , ylab = 'acids' , main = 'acc rate')
+points( ac$EFT , ac$Acc.rate.formic , col = 2 )
+legend("topright", inset=.05, c('acetic','formic'),lty=c(1, 1), pch=c(1, 1), col=c(1, 2))
+```
+## Regresssion on accumulate rate since the model for values of acetic acid may be overfitting. Inspired by methods in finance(stocks analysis), normally it's easier to predict the values than rate. However, the rate contains more information.
+### Following results show that the stepwise selection of regression can't predict the trend(of accumulation rate) well. Initially, this was meant to detect mediation effect if the correlation is significant. But it's not. So we can just ignore this step. (Notice that, the formic accid is excluded in the final model, which means that: no relationship is detected) 
+```{r include = FALSE}
+slr = step( lm( interpolated__acc_acetic ~., data= data1) )
+#plot(slr)
+```
+```{r}
+summary(slr)
+```
+
+
+

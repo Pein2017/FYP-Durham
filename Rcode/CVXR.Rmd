@@ -1,0 +1,295 @@
+---
+title: "CVSR"
+author: "Peian Lu"
+date: '2022-05-20'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+
+# write('PATH="$C:\\rtools40\\usr\\bin;${PATH}"', file = "~/.Renviron")
+# write('PATH="$C:\\rtools40\\mingw64\\bin;${PATH}"', file = "~/.Renviron" , append = TRUE)
+# write('PATH="$C:\\rtools40;${PATH}"', file = "~/.Renviron" , append = TRUE)
+# write('PATH="$C:\\rtools40\\usr\\bin;${PATH}"', file = "~/.Renviron", append = TRUE)
+pkgbuild::find_rtools(debug = TRUE)
+#write'PATH="$C:\\rtools40\\usr\\bin;${PATH}"'
+writeLines('PATH="$D:\\Rsoftware\\rtools42\\usr\\bin;${PATH}"', con = "~/.Renviron")
+Sys.which("make")
+install.packages("jsonlite", type ="source")
+```
+```{r}
+Sys.setenv("PATH" ="D:/Rsoftware/mosek/9.3/tools/platform/win64x86/bin" , sep=""))
+```
+
+
+
+```{r}
+#library(glmnet)
+library(CVXR)
+#library(Rmosek)
+#D:\Rsoftware\mosek\9.3\tools\platform\win64x86\rmosek
+
+source("D:/Rsoftware/9.3/tools/platform/win64x86/rmosek/builder.R")
+attachbuilder()
+install.rmosek()   # MSK_BINDIR = "D:\\Rsoftware\\R-4.2.0\\library" 
+installed_solvers()
+```
+
+### offline data main
+```{r}
+#data = read.csv( "C:/Users/85212/Desktop/Pro-Data/main.csv" ,header=TRUE) 
+data = read.csv("C:/Users/85212/Desktop/Pro-Data/online.csv", header=TRUE)
+#names(data) = c( 'Sample.Key',names(data)[-1] )
+#data = data[-1,]
+data= data[,-2]
+colnames(data)[1]='EFT..Hours'
+#names(data)
+ac = read.csv( "C:/Users/85212/Desktop/Pro-Data/acids.csv" ,header=TRUE) 
+#names(ac) = c( 'Date',names(ac)[-1] )
+```
+
+## Merging by Cubic Spline Interpolation
+```{r}
+x = ac$EFT
+y = ac$acetic
+x_out = data$EFT..Hours
+interpolated_acetic = spline(x = x ,y = y , xout = x_out )
+data1 = cbind(data, interpolated_acetic=interpolated_acetic$y) 
+data1 = dplyr:: filter( data1 , EFT..Hours < 360)
+```
+
+```{r}
+C:\Users\85212\mosek\9.3\tools\platform\win64x86\bin
+Sys.setenv(PKG_MOSEKHOME="C:\\Users\\85212\\mosek\\9.3\\tools\\platform\\win64x86\\bin")
+Sys.setenv(PKG_MOSEKLIB="mosek64_9_3")
+```
+
+
+## Pre-process
+```{r}
+data1 =  data1[complete.cases(data1) ,]
+data1$interpolated_acetic[ which(data1$interpolated_acetic < 0 )] = 0
+remove_col = c()
+for (j in 1:dim(data1)[2] )
+{
+  if (  mean(data1[,j]) < 0.01 | min(data1[,j])  == mean(data1[,j])  )
+  remove_col = c(remove_col , j)
+  else
+  {
+    wrong_row = which(data1[,j] < 0 )
+    data1[wrong_row , j] = 0
+  }
+  
+}
+data1 = data1[,-remove_col]
+#summary(data1)
+```
+
+## CVSR
+### Lasso
+```{r}
+
+trunc_lasso = function( data1 ,  lambda  , constrain = FALSE, trunc_thres = 0 , seed = 1)
+{
+  set.seed(seed)
+  p = ncol(data1)   ### 
+  col = ncol(data1)
+  x = as.matrix( data1[,-col])
+  xDesign = cbind(1, x)
+  y = data1$interpolated_acetic
+  n = nrow(data1)
+  
+  beta = Variable(p)
+  obj = sum_squares(y - xDesign %*% beta) / (2 * n) + lambda * p_norm(beta[-1], 1)
+  constraint1 = xDesign %*% beta >= trunc_thres
+  if ( constrain == TRUE)
+  {
+  prob = Problem(Minimize(obj) , constrain = list(constraint1) ) #
+  }
+  else
+  {
+    prob = Problem(Minimize(obj))
+  }
+  result = solve(prob  , solver = 'MOSEK') #, solver = 'SCS'
+  
+  coeff = result$getValue(beta)
+  pred = xDesign %*% coeff
+  MSE = sum( (y-pred)^2  ) / n 
+  
+  return  ( list(result = result , MSE = MSE)    )
+}
+
+
+```
+### Elastic Net
+```{r}
+elastic_reg = function(beta, lambda = 0, alpha = 0) {
+    ridge = (1 - alpha) / 2 * sum(beta^2)
+    lasso = alpha * p_norm(beta, 1)
+    return ( lambda * (lasso + ridge) )
+}
+```
+
+```{r}
+elastic_net = function( data1 ,  lambda , alpha  , constrain = FALSE, trunc_thres = 0 , seed = 1)
+{
+  set.seed(seed)
+  p = ncol(data1)   ### 
+  col = ncol(data1)
+  x = as.matrix( data1[,-col])
+  xDesign = cbind(1, x)
+  y = data1$interpolated_acetic
+  n = nrow(data1)
+  beta = Variable(p)
+  loss = sum((y - xDesign %*% beta)^2) / (2 * n)
+  obj = loss + elastic_reg(beta, lambda, alpha)
+  constraint1 = xDesign %*% beta >= trunc_thres
+  if ( constrain == TRUE)
+  {
+  prob = Problem(Minimize(obj) , constrain = list(constraint1) ) #
+  }
+  else
+  {
+    prob = Problem(Minimize(obj))
+  }
+  result = solve(prob  , solver = 'MOSEK') #, solver = 'SCS'
+  coeff = result$getValue(beta)
+  pred = xDesign %*% coeff
+  MSE = sum( (y-pred)^2  ) / n 
+  return  ( list(result = result , MSE = MSE)    )
+}
+
+```
+
+```{r}
+res = elastic_net( data1 ,  0.1 , 0.9  , constrain = TRUE, trunc_thres = 0 , seed = 1)
+```
+
+
+
+```{r}
+ggplot(data.frame(pred=pred , reg = reg$fitted.values), aes(pred, reg)) +
+geom_point() +
+# geom_smooth() +
+geom_smooth(method = "lm", col = "red") +
+theme_bw()
+```
+
+
+
+## Run Lasso
+```{r}
+distance = 1e-2
+s = seq(0 , 1, distance)
+mse_constrain = c()
+mse_without_constrain=c()
+status_constrain=c()
+status_without_constrain=c()
+n = length(s)
+proc_record = round( n * 0.1 )
+for (i in 1:n )
+{
+lambda = s[i]
+with_constrain = trunc_lasso( data1 , lambda  ,constrain = TRUE)
+without_constrain = trunc_lasso( data1 , lambda  )
+mse_constrain = c(mse_constrain , with_constrain$MSE )
+mse_without_constrain = c(mse_without_constrain, without_constrain$MSE )
+status_constrain = c( status_constrain , with_constrain$result$status )
+status_without_constrain = c( status_without_constrain , without_constrain$result$status)
+if (  i %% proc_record == 0 )
+{
+  cat("now is the: ", round(10*i/proc_record), "% \n"  )
+}
+  
+}
+output = data.frame( lambda = s , constrain = mse_constrain , 
+                     no_constrain = mse_without_constrain ,  status_constrain = status_constrain ,
+                     status_without_constrain)
+
+```
+### Run elastic 
+```{r}
+distance = 1e-1
+s = seq(distance , 1, distance)
+al = seq( 0 , 1 ,  0.1)
+total = length(s) * length(al)
+proc_record = round( total * 0.1 )
+counter = 0
+mse1 = matrix(0 , ncol = length(s) , nrow = length(al) )
+colnames(mse1) = s
+error_record = c()
+mse2 = matrix(0 , ncol = length(s) , nrow = length(al) )
+colnames(mse2) = s
+start_time = Sys.time()
+for (j in 1:length(al) )
+for (i in 1:length(s) )
+{
+  lambda = s[i]
+  alpha = al[j]
+  with_constrain = elastic_net( data1 ,  lambda , alpha  , constrain = TRUE)
+  without_constrain = elastic_net( data1 ,  lambda , alpha )
+  # mse1[j,i] = with_constrain$MSE
+  mse2[j,i] = without_constrain$MSE
+  
+  # if ( sum( c(with_constrain$result$status , without_constrain$result$status) == c("optimal","optimal")  ) !=2  )
+  # {
+  #   error_record = c( error_record , i , ':' , j ,'|'   )
+  # }
+  
+  counter = counter + 1
+  if (  counter %% proc_record == 0 )
+  {
+    cat("now is the: ", round(10*counter/proc_record), "% \n"  )
+  }
+}
+end_time = Sys.time()
+# output = data.frame( lambda = s , alpha = al , constrain = mse_constrain , 
+#                      no_constrain = mse_without_constrain ,  status_constrain = status_constrain ,
+#                      status_without_constrain)
+cat("time: ", end_time - start_time )
+persp(mse2, theta =60, phi = 30, expand = 0.5, col = "lightblue")
+
+
+```
+## cvglmnet
+```{r}
+p = ncol(data1)   ### 
+col = ncol(data1)
+x = as.matrix( data1[,-col])
+xDesign = cbind(1, x)
+y = data1$interpolated_acetic
+n = nrow(data1)
+parallelStartSocket(cpus = detectCores())
+cvfit <- cv.glmnet(xDesign, y , lambda = seq(0, 1e-6 , 1e-8 ) , parallel = TRUE)
+plot(cvfit)
+parallelStop()
+cvfit$lambda.min # 交叉验证平均误差最小时模型的lambda
+cvfit$lambda.1se 
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+one_se_coef = as.matrix( coef(cvfit)[-2] )# 默认s = "lambda.1se"
+pred_min =   xDesign  %*% min_coef
+pred_one_se = xDesign %*% one_se_coef
+cat( sum(pred_min - y )^2/n , sum(pred_one_se - y )^2 / n  )
+```
+
+
+
+
+
+
+
+## Comparison
+```{r}
+m <- cbind(coef(ls.model), result$getValue(betaHat))
+colnames(m) <- c("lm est.", "CVXR est.")
+rownames(m) <- paste0("$\\beta_{", 1:p, "}$")
+```
+
+
+
+
