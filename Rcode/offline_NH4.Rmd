@@ -1,0 +1,71 @@
+---
+title: "online_offline_NH3"
+author: "Peian"
+date: "2022-08-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2.in.offgas.." ) ] 
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+data19 = data19[,-c(53:59)]
+```
+
+### load the offline data
+```{r}
+offline = read.csv("C:/Users/85212/Desktop/Pro-data/joinacids.csv", header=TRUE)
+offline = dplyr:: filter( offline , EFT_H < 361)
+offline_time = offline$EFT_H
+off_data = c()
+x_out = data19$EFT_H
+nm = names(offline)
+for (j in 2:9)
+{
+  y = offline[,j]
+  index = complete.cases( y )
+  x = offline_time[index]
+  y = y[index]
+  interpolated = spline(x = x ,y = y , xout = x_out )$y
+  interpolated[ which(interpolated < 0) ] = 0
+  off_data = cbind( off_data , interpolated )
+}
+colnames(off_data) = names(offline)[2:9]
+off_data = as.data.frame( off_data )
+# join the offline data
+p = ncol(data19)
+data19 = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+```
+
+
+# compare offline and online
+```{r}
+online_cols = c(31,31,56,32,33,9,10,11)
+offline_cols = c(2,3,4,4,4,7,7,7)
+for ( i in 1:8)
+{
+  x = online_cols[i]
+  y = offline_cols[i]
+  plot( data19[,x] ,  off_data[,y] , xlab = names(data19)[x] , ylab = names(off_data)[y], main = "online VS offline" )
+}
+```
+```{r}
+par(mfrow=c(1,2))
+plot(off_data$Final.OD)
+plot(data19$optical.density)
+reg = lm( off_data$Final.OD ~ data19$optical.density )
+pred = predict( reg , as.data.frame(data19$optical.density) )
+plot( off_data$Final.OD )
+points( pred , col = "red")
+```
+

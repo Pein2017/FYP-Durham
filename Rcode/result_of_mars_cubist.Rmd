@@ -1,0 +1,539 @@
+---
+title: "Results"
+author: "Peian"
+date: "2022-08-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 360)
+data19 = temp$data_19
+ac19 = temp$ac_19
+full_weights = get_data_weights( data19$EFT_H , ac19$EFT )
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2_in_offgas" ) ] 
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+data19 = data19[,-c(3:4 , 51:57)]
+data_original = data19
+```
+
+### Get data weights
+```{r}
+weights = get_data_weights( data19$EFT_H , ac19$EFT )
+```
+
+
+### load the offline data
+```{r}
+offline = read.csv("C:/Users/85212/Desktop/Pro-data/joinacids.csv", header=TRUE)
+offline = dplyr:: filter( offline , EFT_H < 360)
+offline_time = offline$EFT_H
+off_data = c()
+x_out = data19$EFT_H
+nm = names(offline)
+for (j in 2:9)
+{
+  y = offline[,j]
+  index = complete.cases( y )
+  x = offline_time[index]
+  y = y[index]
+  interpolated = spline(x = x ,y = y , xout = x_out )$y
+  interpolated[ which(interpolated < 0) ] = 0
+  off_data = cbind( off_data , interpolated )
+}
+colnames(off_data) = names(offline)[2:9]
+off_data = as.data.frame( off_data )
+# join the offline data
+p = ncol(data19)
+data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+```
+
+
+### de-noise
+```{r}
+### de noise   ----------------------------------------------------------
+de_noise = function( data19 , thres = 6 ,  windows_size = 3 , sd_factor = 2 )
+{
+  p = ncol(data19)
+  cols = count_dataframe( data19 , thres = thres ) 
+  cols = cols$columns
+  temp = c(cols,p)
+  columns = c()
+  for ( i in 1:p)
+  {
+    if  ( length( intersect(i , temp) ) !=0 )
+    {
+      next
+    }
+    columns= c(columns , i )
+  }
+  nm = names(data19)
+  time = data19$EFT_H
+  for (j in columns)
+  {
+    if (nm[j] == "interpolated_acetic")
+    {
+      next
+    }
+    x = data19[,j]
+    std = sd(x)
+    difference = abs( diff(x) )
+    index_noise = which( difference > sd_factor *std )
+    for (i in (index_noise+1) ){
+      if ( i > windows_size  && i <= length(x) - windows_size - 1 )
+      {
+        estimate = mean_xt( x , i , windows_size)
+        x[i] = estimate
+        if (sum(is.na(x) > 0))
+          {
+            stop("has NULL value")
+            break
+          }
+      }
+    }
+    data19[,j] = x
+  }
+  return (data19)
+}
+
+```
+### denoise data
+```{r}
+p = ncol(data19)
+#data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+denoise_original = cbind( de_noise( data19[,-p] ) ,interpolated_acetic = data19[,p] )
+denoise_combine =cbind(denoise_original[,-p] , off_data , interpolated_acetic= data19[,p])
+```
+### index 3 is with the offline
+```{r}
+index1 = c(53,65,30,28,21,3,32,25,18,46,27,16,49,48,15,51,19,5,31,11,38,43,6,68,44,33,4,2,52,17,13,10,9,14,66,12,63,7,8,45,40,50,39,37,64,42,47,41)
+index2 = c(53,65,30,28,3,32,18,46,27,20,16,49,19,5,31,11,38,43,6,68,44,33,4,2,52,17,13,66,12,63,7,45,40,50,39,37,64,42,47,41)
+index3 = c(66,57,58,50,23,25,65,27,59,63,1,43,29,24,2,62,15,12,46,13,3,16,61,8,28,40,14,35,30,10,4,49,54,5,9,41,53,64,34,37,36,42,39,44,38 , 65)
+index4 = c(64,55,1,56,23,2,10,25,41,63,61,57,22,60,27,13,3,11,46,14,4,44,59,12,47,28,7,26,33,36,38,35,34,40,62,39,52,42,51,32,37,65)
+index5 = c(64,55,1,56,23,21,2,10,25,41,63,61,57,22,60,27,13,3,11,46,14,4,6,5,44,59,12,47,28,7,26,33,36,38,35,34,40,62,39,52,42,51,32,37,65)
+```
+
+### Selecting the data closest to real data
+```{r , echo = FALSE}
+set.seed(825)
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )
+}
+
+data_combine = data_combine[,-1]
+denoise_combine = denoise_combine[,-1]
+
+train_combine = data_combine[ , ]
+test_combine = data_combine[index , ]
+
+train_denoise_combine = denoise_combine[,]
+test_denoise_combine = denoise_combine[index,]
+cat("\n")
+dim(data_combine)
+dim(denoise_combine)
+```
+
+# Go
+## Pre-process
+```{r}
+set.seed(825)
+cpu = detectCores()
+tuneLength = 2
+repeats = 2
+folds = 3
+total = repeats * folds 
+result = c() ##  Record for performances
+lambdaSearch = seq( 0, 1 , length.out = 30) 
+lambdaSearch[2] = 1e-5   ## set a small number to check whether lasso works #
+alphaSearch = seq(0,1, length.out = 10)
+# Set the seeds
+seeds = vector(mode = "list", length = total+1)
+for(i in 1:total) seeds[[i]]= sample.int(n=10000, 1000 )
+seeds[[ (total+1) ]]=sample.int(10000, 1)
+# Set fitControl for the trControl
+fitControl = trainControl( method = "repeatedcv", number = folds, repeats = repeats , search = "random" ,seed = seeds)
+#fitControl = trainControl( method = "none" )
+```
+
+
+
+### Search grid
+```{r}
+m5_grid = expand.grid(pruned = c("Yes"), smoothed = c("Yes"), rules = c("Yes") ) 
+cubist_grid = expand.grid(committees = c(1), neighbors = seq(0,4,1))
+```
+
+
+
+# Rename
+```{r}
+nm = names(denoise_combine)
+new = nm[1]
+for ( element in nm[-1])
+  new = paste(new, element, sep = ',')
+new
+
+```
+
+```{r}
+names_index = c(3:9,10:24,52:57,58:64,27:28,41)
+renames = c("harvest.flow","pH.stn5","pH.stn3","pH.stn1",
+            "CH4.offgas","CO2.offgas","LEL.online",
+            "dissolved.stn1","dissolved.stn2","dissolved.stn3","dissolved.stn4","dissolved.stn5",
+            "methane.stn1","methane.stn2","methane.stn3","methane.stn4","methane.stn5",
+            "oxygen.stn1","oxygen.stn2","oxygen.stn3","oxygen.stn4","oxygen.stn5",
+            "Ratio.stn1","Ratio.stn2","Ratio.stn3","Ratio.stn4","Ratio.stn5","FinalOD",
+            "DCW","NH4_offline","K.ppm","LEL.offline","pH.offline",
+            "Productivity","NH4.Productivity","ammonia.p1","ammonia.p2",
+            "phosphoric")
+names(denoise_combine)[names_index] = renames
+names(test_denoise_combine)[names_index] = renames
+nm = names(denoise_combine)
+
+fitControl = trainControl( method = "none" )
+# fitControl = trainControl( method = "repeatedcv", number = 10, repeats = 2 )
+
+# for original, degree = 2, nprune = 35
+# for denoise, degree = 3 , nprune = 50
+# for full, degree = 3, nprune = 46 ,
+# for sub, degree = 3, nprune = 50
+preProcess = c("center" , "scale")
+cubist_grid = expand.grid(committees = c(1), neighbors = 0)
+mars = modelTrain( data = denoise_combine[, index5] , method = "earth" , 
+                   trControl = fitControl, 
+                   weights  = NULL, preProcess = NULL,
+                   tuneGrid = mars_grid, cpu = cpu , test = test_denoise_combine)
+
+
+cubist = modelTrain( data = denoise_combine[,index5] , method = "cubist" , 
+                     trControl = fitControl,
+                     weights  = NULL, 
+                     tuneGrid = cubist_grid , cpu = cpu , 
+                     test = test_denoise_combine)
+nm = names(denoise_combine)[-ncol(denoise_combine)]
+mars_imp = getVarImp( mars , nm)
+# mars_imp = sort(mars_imp ,decreasing = TRUE)
+cubist_imp = getVarImp( cubist , nm)
+# cubist_imp = sort(cubist_imp ,decreasing = TRUE)
+vimp = cbind(mars_imp,cubist_imp)
+rownames(vimp) = nm
+# vimp
+```
+
+```{r}
+reg = lm( interpolated_acetic ~., data = denoise_combine[,index4] )
+vif(reg)
+```
+
+```{r}
+bx <- mars$model$finalModel$bx # earth's basis mat
+lm.mod <- lm( denoise_combine$interpolated_acetic ~ bx[,-1] ) # standard linear regression on earth's basis mat
+# (-1 drops intercept)
+summary(lm.mod)
+plotmo( mars$model$finalModel )
+# nfold=10, ncross=30,
+# varmod.method="lm")
+# plotmo(mod, pt.col=1, level=.95)
+```
+
+# MARS coefs
+```{r}
+mars_grid = expand.grid( degree = 2 , nprune =50)
+mars = modelTrain( data = denoise_combine[, index5] , method = "earth" , 
+                   trControl = fitControl, 
+                   weights  = NULL, preProcess = NULL,
+                   tuneGrid = mars_grid, cpu = cpu , test = test_denoise_combine)
+
+imp = varImp( mars$model  ) 
+imp = imp$importance %>%
+  as.data.frame() %>%
+  mutate( variable = row.names(.) ) %>%
+  filter( Overall > 0 )
+
+res = mars$model$finalModel$coefficients %>%
+  as.data.frame() %>%
+  mutate( parameter = row.names(.)) %>%
+  dplyr:: select( parameter, coef = y )
+#write.csv(res, file ="MARS_final_sub.csv" )
+```
+
+## NH4 Productivity
+```{r}
+par( mfrow = c(2 , 1) )
+index = which(denoise_combine$NH4.Productivity <=0.8)
+plot( data19$EFT_H ,  denoise_combine$NH4.Productivity , col = 'black' , xlab="EFT",ylab = "NH4_productivity" , main = "NH4_Productivity")
+points( data19$EFT_H[index] ,  denoise_combine$NH4.Productivity[index], col = 'red')
+
+
+plot( data19$EFT_H ,  denoise_combine$interpolated_acetic , col = 'black' , xlab="EFT",ylab = "interpolated_acetic" , main = "interpolated_acetic")
+points( data19$EFT_H[index] ,  denoise_combine$interpolated_acetic[index], col = 'red')
+# abline( v = c(192,218) , col ='blue')
+# abline( v = c( 249,259) , col = 'green')
+# abline( v = c(272,282) , col = "brown")
+#cbind(offline$EFT_H ,offline$NH4_Productivity__kg_DCW_h_)
+
+```
+# phosphoric
+```{r}
+par( mfrow = c(3,1) )
+index1 = which(denoise_combine$phosphoric > 0.6)
+plot( data19$EFT_H ,  denoise_combine$phosphoric , col = 'black' , xlab="EFT",ylab = "phosphoric" , main = "phosphoric > 0.6")
+points( data19$EFT_H[index1] ,  denoise_combine$phosphoric[index1], col = 'red')
+
+index2 = which(denoise_combine$oxygen.stn2 >2.6)
+plot( data19$EFT_H ,  denoise_combine$oxygen.stn2 , col = 'black' , xlab="EFT",ylab = "oxygen.stn2" , main = "oxygen.stn2 > 2.6 ")
+points( data19$EFT_H[index2] ,  denoise_combine$oxygen.stn2[index2], col = 'red')
+
+index3 = intersect(index1,index2)
+
+plot( data19$EFT_H ,  denoise_combine$interpolated_acetic , col = 'black' , xlab="EFT",ylab = "interpolated_acetic" , main = "interpolated_acetic")
+points( data19$EFT_H[index3] ,  denoise_combine$interpolated_acetic[index3], col = 'red')
+```
+# Oxygen2 > 2.9
+```{r}
+par( mfrow = c (2,1) )
+index1 = which(denoise_combine$oxygen.stn2 > 2.9 )
+plot( data19$EFT_H ,  denoise_combine$oxygen.stn2 , col = 'black' , xlab="EFT", main = "oxygen.stn2 > 2.9")
+points( data19$EFT_H[index1] ,  denoise_combine$oxygen.stn2[index1], col = 'red')
+
+plot( data19$EFT_H ,  denoise_combine$interpolated_acetic , col = 'black' , xlab="EFT",ylab = "interpolated_acetic" , main = "interpolated_acetic")
+points( data19$EFT_H[index1] ,  denoise_combine$interpolated_acetic[index1], col = 'red')
+```
+
+
+
+
+
+```{r}
+imp_index = c(1:7,9,10,12,13)
+
+svg(file="MARS_final_sub_partial.svg" , width = 15, height = 30 ) #  
+plotmo(mars$model,pmethod="partdep", all1 =FALSE, all2 = FALSE,degree1 = imp$variable[imp_index], degree2 = imp$variable[imp_index],
+        type2="persp",
+        ngrid2=30,
+        col.persp = "lightblue", 
+        cex = 2 , prednames.abbreviate=FALSE)
+dev.off()
+
+print(summary(mars$model$finalModel, digits=3))
+```
+
+
+# 
+```{r}
+
+par(mfrow=c(2,1))
+plot(offline$EFT_H,offline$DCW_CPI__g_L_ , xlab = "EFT" , ylab = "DCW" , main = "DCW" )
+abline( v = c(10,29) , col = "brown")
+abline( v = c(213,232) , col ='blue')
+abline( v = c(262,264) , col = 'green')
+
+plot(offline$EFT_H,offline$Productivity__kg_DCW_h_ , xlab = "EFT" , ylab = "Productivity", main = "Productivity")
+abline( v = c(10,29) , col = "brown")
+abline( v = c(213,232) , col ='blue')
+abline( v = c(262,264) , col = 'green')
+
+```
+
+# 
+```{r}
+cbind(data19$EFT_H[index] ,  denoise_combine$NH4_Productivity__kg_DCW_h_[index])
+```
+## O2_stn2
+# thres = 2.6
+```{r}
+data = cbind( EFT_H = data19$EFT_H ,denoise_combine )
+index1 = which(data$oxygen_flow_stn2 > 2.9)
+par(mfrow = c(3,1))
+plot(data$EFT_H, data$oxygen_flow_stn2 , col = "black")
+points( data$EFT_H[index1] , data$oxygen_flow_stn2[index1] , col = "red")
+
+plot( data$EFT_H , data$interpolated_acetic , col = "black")
+points(data$EFT_H[index1], data$interpolated_acetic[index1] ,col = "red")
+
+plot( data$EFT_H , data$Productivity__kg_DCW_h_ , col = "black")
+points(data$EFT_H[index1], data$Productivity__kg_DCW_h_[index1] ,col = "red")
+```
+
+```{r}
+# 28 NH4_prod
+# 48 ammonia pump flow 1
+# 19 LEL
+# 40 Prod > 5.91
+# 19 oxygen_stn4  <=2.9
+# 41 oxgyen_stn4  >2.9
+# 7  oxgyen_stn2  2.8 <= 3 
+# 6  oxygen_stn2  <=2.8
+# 11  >2.8
+# 13  > 3
+
+# 28 final OD
+
+# 2   LEL >11.31     5   <= 3.76
+
+# 42 52 most variations 
+
+# 13 Ratio stn5 < 0.35   16  >0.35
+tr <- tidyRules(cubist$model$finalModel)
+r_index = 18
+rule_expr  = char_to_expr(tr, r_index, model = FALSE)
+model_expr = char_to_expr(tr, r_index, model = TRUE)
+rule_expr
+model_expr
+```
+# 
+```{r}
+cub = cubist$model$finalModel
+summary(cub)
+```
+
+
+
+
+```{r}
+rule = 19
+cub_control = cubistControl( rules = rule)
+cub = cubist( x = denoise_combine[,index5[-length(index5)]] , 
+              y = denoise_combine$interpolated_acetic , 
+              control = cub_control,
+              committees = 1 , seed = 50)
+p1 <- dotplot(cub, what = "splits",main='Rules' )
+p2 <- dotplot(cub, what = "coefs", main='Coefs', 
+              scales = list( x = list(relation = "free"),
+              y = list(cex = .25))  )
+svg(file="cubist_coefs.svg" , width = 17, height = 50)
+p2
+dev.off()
+
+summary(cub)
+```
+
+
+
+# Cat plots
+
+```{r} 
+index_ac = 36:41 #140.91 144.48 147.91 154.25 157.29 160.30
+# 847 : 962
+index = c()
+false_index = c()
+gap = 8
+for ( i in index_ac )
+{
+  ans = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )[1]
+  index = c(index , ans )
+  false_index = c(false_index , ans - gap , ans + gap)
+}
+
+index_online = false_index
+plot(data$EFT_H[index_online], data$interpolated_acetic[index_online]  , 
+     main = "Extraction of test set", xlab = "EFT" , 
+     ylab = "acetic acid", col = "black")
+points(ac19$EFT_H[index_ac] , ac19$acetic[index_ac] , col = "red")
+points(data$EFT_H[index] , data$interpolated_acetic[index] , col = "blue")
+legend( "topleft", legend=c("offline value ", "interpolated value" , "test sample"), pch = c(1,1,1),
+       col=c("red", "black","blue") )
+```
+
+#Test
+```{r}
+rmse = c()
+grid =16 : 25
+for ( rule in grid)
+{
+cub_control = cubistControl( rules = rule)
+cub = cubist( x = denoise_combine[,index5[-length(index5)]] , 
+              y = denoise_combine$interpolated_acetic , 
+              control = cub_control,
+              committees = 1 , seed = 50)
+Predict = predict( cub, newdata = test_denoise_combine)
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+rmse = c(rmse,RMSE)
+}
+plot(grid,rmse)
+```
+
+```{r}
+cub_control = cubistControl( rules = 19)
+cub = cubist( x = denoise_combine[,index5[-length(index5)]] , 
+              y = denoise_combine$interpolated_acetic , 
+              control = cub_control,
+              committees = 1 , seed = 50)
+
+p1 <- dotplot(cub, what = "splits",main='Rules' )
+p2 <- dotplot(cub, what = "coefs", main='Coefs', 
+              scales = list( x = list(relation = "free"), between = list(x = 1, y = 1),
+              y = list(cex = .25))  )
+svg(file="cubist_rules.svg" , width = 17, height = 50)
+p1
+dev.off()
+summary(cub)
+varImp(cub)
+```
+
+
+##Cubist
+
+```{r}
+library(tidyrules)
+tr <- tidyRules(cubist$model$finalModel)
+```
+
+```{r}
+char_to_expr <- function(x, index = 1, model = TRUE) {
+  x <- x %>% dplyr::slice(index) 
+  if (model) {
+    x <- x %>% dplyr::pull(RHS) %>% rlang::parse_expr()
+  } else {
+    x <- x %>% dplyr::pull(LHS) %>% rlang::parse_expr()
+  }
+  x
+}
+
+```
+
+# 16: 310 ~335 12: 319 ~ 331
+
+
+```{r}
+#tr <- tidyRules(cub)
+r_index = 1
+rule_expr  = char_to_expr(tr, r_index, model = FALSE)
+model_expr = char_to_expr(tr, r_index, model = TRUE)
+rule_expr
+model_expr
+```
+
+
+```
+# substract data
+```{r}
+data = cbind( EFT_H = data19$EFT_H , denoise_combine)
+filtered_data = data %>% 
+                dplyr::filter(eval_tidy(rule_expr, data)) %>%
+                dplyr::mutate(sale_price_pred = eval_tidy(model_expr, .)) %>%
+                dplyr::select(EFT_H , NH4_Productivity__kg_DCW_h_ , interpolated_acetic)
+
+left = min(filtered_data$EFT_H[-1]);
+ight = max(filtered_data$EFT_H);
+v1 = data['NH4_Productivity__kg_DCW_h_'] 
+
+index = c( min(which(ac19$EFT_H>left)) :  max( which( ac19$EFT_H <right) )   )
+plot( ac19$EFT_H[index] , ac19$acetic[index] , col = "red" , xlab = "EFT" , ylab = "acid")
+index = c( min(which(data$EFT_H>left)) :  max( which( data$EFT_H <right) )   )
+plot( data$EFT_H , v1[,1]  , col = "black" , xlab = "EFT", ylab = names(v1)  )
+points(data$EFT_H[index] , v1[index,1] , col = 'red')
+# for oxygen stn2 > 2.8
+# EFT_H 71,71.17    142~147
+
+```

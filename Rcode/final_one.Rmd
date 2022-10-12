@@ -1,0 +1,421 @@
+---
+title: "Final_one"
+author: "Peian"
+date: "2022-08-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2_in_offgas" ) ] 
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+data19 = data19[,-c(3:4 , 51:57)]
+data_original = data19
+```
+
+### Get data weights
+```{r}
+weights = get_data_weights( data19$EFT_H , ac19$EFT )
+```
+
+
+### load the offline data
+```{r}
+offline = read.csv("C:/Users/85212/Desktop/Pro-data/joinacids.csv", header=TRUE)
+offline = dplyr:: filter( offline , EFT_H < 361)
+offline_time = offline$EFT_H
+off_data = c()
+x_out = data19$EFT_H
+nm = names(offline)
+for (j in 2:9)
+{
+  y = offline[,j]
+  index = complete.cases( y )
+  x = offline_time[index]
+  y = y[index]
+  interpolated = spline(x = x ,y = y , xout = x_out )$y
+  interpolated[ which(interpolated < 0) ] = 0
+  off_data = cbind( off_data , interpolated )
+}
+colnames(off_data) = names(offline)[2:9]
+off_data = as.data.frame( off_data )
+# join the offline data
+p = ncol(data19)
+data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+```
+
+
+### de-noise
+```{r}
+### de noise   ----------------------------------------------------------
+de_noise = function( data19 , thres = 6 ,  windows_size = 3 , sd_factor = 2 )
+{
+  p = ncol(data19)
+  cols = count_dataframe( data19 , thres = thres ) 
+  cols = cols$columns
+  temp = c(cols,p)
+  columns = c()
+  for ( i in 1:p)
+  {
+    if  ( length( intersect(i , temp) ) !=0 )
+    {
+      next
+    }
+    columns= c(columns , i )
+  }
+  nm = names(data19)
+  time = data19$EFT_H
+  for (j in columns)
+  {
+    if (nm[j] == "interpolated_acetic")
+    {
+      next
+    }
+    x = data19[,j]
+    std = sd(x)
+    difference = abs( diff(x) )
+    index_noise = which( difference > sd_factor *std )
+    for (i in (index_noise+1) ){
+      if ( i > windows_size  && i <= length(x) - windows_size - 1 )
+      {
+        estimate = mean_xt( x , i , windows_size)
+        x[i] = estimate
+        if (sum(is.na(x) > 0))
+          {
+            stop("has NULL value")
+            break
+          }
+      }
+    }
+    data19[,j] = x
+  }
+  return (data19)
+}
+
+```
+### denoise data
+```{r}
+p = ncol(data19)
+#data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+denoise_original = cbind( de_noise( data19[,-p] ) ,interpolated_acetic = data19[,p] )
+denoise_combine =cbind(denoise_original[,-p] , off_data , interpolated_acetic= data19[,p])
+```
+### index 3 is with the offline
+```{r}
+index1 = c(53,65,30,28,21,3,32,25,18,46,27,16,49,48,15,51,19,5,31,11,38,43,6,68,44,33,4,2,52,17,13,10,9,14,66,12,63,7,8,45,40,50,39,37,64,42,47,41)
+index2 = c(53,65,30,28,3,32,18,46,27,20,16,49,19,5,31,11,38,43,6,68,44,33,4,2,52,17,13,66,12,63,7,45,40,50,39,37,64,42,47,41)
+index3 = c(66,57,58,50,23,25,65,27,59,63,1,43,29,24,2,62,15,12,46,13,3,16,61,8,28,40,14,35,30,10,4,49,54,5,9,41,53,64,34,37,36,42,39,44,38)
+```
+
+### Selecting the data closest to real data
+```{r , echo = FALSE}
+set.seed(825)
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )
+}
+
+data_original = data_original[,-1]
+data_combine = data_combine[,-1]
+denoise_original = denoise_original[,-1]
+denoise_combine = denoise_combine[,-1]
+
+train_original = data_original[-index , ]
+test_original = data_original[index,]
+train_combine = data_combine[-index , ]
+test_combine = data_combine[index , ]
+
+train_denoise_original = denoise_original[-index,]
+test_denoise_original = denoise_original[index,]
+train_denoise_combine = denoise_combine[-index,]
+test_denoise_combine = denoise_combine[index,]
+cat("\n")
+dim(data_original)
+dim(data_combine)
+dim(denoise_original)
+dim(denoise_combine)
+```
+
+# Go
+## Pre-process
+```{r}
+set.seed(825)
+cpu = detectCores()
+tuneLength = 4
+repeats = 2
+folds = 3
+total = repeats * folds 
+result = c() ##  Record for performances
+lambdaSearch = seq( 0, 1 , length.out = 30) 
+lambdaSearch[2] = 1e-5   ## set a small number to check whether lasso works #
+alphaSearch = seq(0,1, length.out = 10)
+# Set the seeds
+seeds = vector(mode = "list", length = total+1)
+for(i in 1:total) seeds[[i]]= sample.int(n=10000, 1000 )
+seeds[[ (total+1) ]]=sample.int(10000, 1)
+# Set fitControl for the trControl
+fitControl = trainControl( method = "repeatedcv", number = folds, repeats = repeats , search = "random" ,seed = seeds)
+#fitControl = trainControl( method = "none" )
+```
+
+
+
+### Search grid
+```{r}
+mars_grid = expand.grid( degree = 2:3,  nprune = floor( seq(30, (p-1), by = 1 ) ) )
+lasso_grid = expand.grid( lambda = lambdaSearch , alpha = 0)
+blasso_grid = expand.grid( lambda = lambdaSearch )
+ridge_grid = expand.grid( lambda = lambdaSearch , alpha = 1 )
+elastic_grid = expand.grid( lambda = lambdaSearch , alpha = alphaSearch )
+m5_grid = expand.grid(pruned = c("Yes"), smoothed = c("Yes"), rules = c("Yes") ) 
+cubist_grid = expand.grid(committees = c(1), neighbors = seq(0,9,1))
+```
+
+
+```{r}
+lm = list( method = "lm" )
+mars = list( method = 'earth' , tune_grid = mars_grid )
+bagMars = list( method = 'bagEarth' )
+adaBag = list( method = 'treebag')
+cart = list( method = 'rpart')
+xgbLinear = list( method = 'xgbLinear') 
+xgb = list( method = 'xgbDART')
+GpKernel = list( method = 'gaussprRadial')
+knn = list( method = 'kknn')
+pls = list( method = 'pls')
+PolyKernelRLs = list( method = 'krlsPoly')
+pcr = list( method = 'pcr')
+rf = list( method = 'rf')
+svmRadial = list( method = 'svmRadial' , weights = weights)
+lasso = list( method = 'glmnet' , tune_grid = lasso_grid)
+ridge = list( method = 'glmnet' , tune_grid = ridge_grid)
+elasticNet = list( method = 'glmnet' , tune_grid = elastic_grid)
+cubist = list(method = "cubist" , tune_grid = cubist_grid)
+wrappers = list( lm = lm,mars = mars,adaBag = adaBag,cart = cart,
+                 xgbLinear = xgbLinear,
+                 xgb = xgb,GpKernel = GpKernel,knn = knn, pls = pls ,
+                 PolyKernelRLs = PolyKernelRLs , pcr = pcr ,
+                 rf = rf, svmRadial = svmRadial ,
+                 lasso = lasso ,  ridge , elasticNet = elasticNet 
+                 ,cubist = cubist)
+
+```
+
+### train with different dataset
+```{r}
+models_original = models_train( train_original, 
+                       wrappers , fitControl , tuneLength ,test_original , cpu )
+models_combine = models_train( train_combine, 
+                       wrappers , fitControl , tuneLength ,test_combine , cpu )
+models_denoise_original = models_train( train_denoise_original, 
+                       wrappers , fitControl , tuneLength ,test_denoise_original , cpu )
+
+models_denoise_combine = models_train( train_denoise_combine, 
+                       wrappers , fitControl , tuneLength ,test_denoise_combine , cpu )
+
+models_combine_sub = models_train( train_combine[,c(index3,ncol(train_combine) )], 
+                       wrappers , fitControl , tuneLength ,test_combine , cpu )
+
+models_denoise_combine_sub = models_train(  
+                       train_denoise_combine[,c(index3,ncol(train_combine) )], 
+                       wrappers , fitControl , tuneLength ,test_denoise_combine , cpu )
+```
+# Testing 
+```{r}
+cub = models_denoise_combine[[1]]
+cub$model
+mar = models_denoise_combine[[2]]
+mar$model
+```
+
+
+
+# get models performance
+```{r}
+models_collectors = list(models_original , models_combine ,
+              models_denoise_original, models_denoise_combine,
+              models_combine_sub, models_denoise_combine_sub)
+cat("order of outputs are: original, combine, denoise-original, denoise-combine, combine-sub, denoise-combine-sub \n")
+for ( models in models_collectors )
+{
+  models_rmse = c()
+  models_mean_per_error = c()
+  for (model in models)
+  {
+    models_rmse = c( models_rmse , model$rmse)
+    models_mean_per_error = c( models_mean_per_error , model$mean_per_error )
+  }
+  names(models_rmse) = names(models)
+  names(models_mean_per_error) = names(models)
+  cat("rmse is ", mean(models_rmse) , "per_error is", mean(models_mean_per_error) ,"\n")
+}
+```
+
+
+### Get importance of variables
+```{r}
+
+nm = names(train)[1:(ncol(train)-1)]
+nm = names(denoise_combine)
+vimp = c()
+models_rmse = c()
+models_mean_per_error = c()
+for (model in models)
+{
+  importance = getVarImp( model , nm)
+  vimp = cbind( vimp , importance)
+  models_rmse = c( models_rmse , model$rmse)
+  models_mean_per_error = c( models_mean_per_error , model$mean_per_error )
+}
+colnames( vimp ) = names( models )
+rownames( vimp ) = nm
+names(models_rmse) = names(models)
+names(models_mean_per_error) = names(models)
+
+```
+
+```{r}
+temp =  sum( models_rmse ) / models_rmse 
+final_weights = as.matrix( temp / sum(temp) )
+final_vimp =  ( as.matrix(vimp) %*% final_weights )
+final_vimp = final_vimp[ order(final_vimp , decreasing = TRUE) , ]
+final_vimp = as.data.frame( cbind( variables = rownames(final_vimp) , weights = final_vimp ) )
+```
+
+
+### forward adding
+```{r}
+#imp is the  output csv of the final_weights
+#imp = read.csv(file.choose(),header = TRUE)
+forward_selection = function( train ,imp , auto = FALSE, change_thres = 8 , remain_thres = 10 , delete_thres = 15 )
+{
+  target_index = ncol(train)
+  nm = names(train)
+  p = nrow(imp)
+  start_inputs = imp$variables[1:2]
+  max_vif = rep(0,2)
+  mean_vif = rep(0,2)
+  inputs = c(which( nm == start_inputs[1] ) , which( nm == start_inputs[2] ) )
+  reg = lm( interpolated_acetic~., train[,c(inputs,target_index)] )
+  prev_vif = round( vif(reg) , 2)
+  run = 0
+  for ( col in 3: p )
+  {
+    run = run+1
+    variable = imp$variables[col]
+    cat("this is run:",run,"--------------------------------- \n")
+    cat("going to add variable:",variable,"\n")
+    cat("\n")
+    new_index = which( nm == variable )
+    if ( length(new_index) == 0)
+    {
+      cat("this variable:",variable, "can't be found in training data set")
+      next
+    }
+    inputs = c(inputs , new_index )
+    reg = lm( interpolated_acetic~., train[,c(inputs,target_index)] )
+    vif_value = round( vif(reg) , 2)
+    current_index = length( vif_value )
+    cat("if we add variable variable:", variable,", the top largest VIFs are:\n")
+    print( vif_value[ c( order( vif_value, decreasing = TRUE )[1:3] ) ] )
+    cat("\n")
+    cat("the current variable's VIF is ", vif_value[current_index] , "\n")
+    
+    vif_change = vif_value[ - current_index ] - prev_vif
+    if (auto == TRUE)
+    {
+      cat("it brings the changes of VIFs(top 2):  \n")
+      print( vif_change[ order( vif_change, decreasing = TRUE )[1:2]] )
+      # 带来的改变太多或者自身的值太大，自动删除
+      if ( max(vif_change) > change_thres | vif_value[current_index] > delete_thres )
+      {
+        cat("it brings too much,", variable,"automatically deleted \n")
+        inputs = inputs[- current_index ]
+        reg = lm( interpolated_acetic~., train[,c(inputs,target_index)] )
+        prev_vif = vif( reg )
+        next
+      }
+      #  带来的改变不多且自身的VIF较小，自动保留
+      else if ( max(vif_change) < change_thres & vif_value[current_index] < remain_thres )
+      {
+        cat("it doesn't bring a lot,", variable,"automatically added \n")
+        prev_vif = vif_value
+        next
+      }
+      # 最大的值超过了最大容忍上限，自动删除
+      else if ( max( vif_value ) > delete_thres )
+      {
+        cat("it breaks the largest VIF threshold,", variable,"automatically deleted \n")
+        inputs = inputs[- current_index ]
+        reg = lm( interpolated_acetic~., train[,c(inputs,target_index)] )
+        prev_vif = vif( reg )
+        next
+      }
+      # 带来的变化不多，自身在chahnge_thres以下，自动保留
+      else
+      {
+        deleted = readline(prompt="enter the delte variables: 1 is delete, 0 is not deleted \n")
+        print("debug here \n")
+        break
+      }
+      
+    }
+    
+    deleted = readline(prompt="enter the delte variables: 1 is delete, 0 is not deleted \n")
+    if ( deleted == "1")
+    {
+      inputs = inputs[- length(inputs) ]
+      reg = lm( interpolated_acetic~., train[,c(inputs,target_index)] )
+      prev_vif = vif( reg )
+    } 
+    else if (deleted == "q")
+    {
+      cat("quit \n")
+      break
+    }
+    else if (deleted == "0")
+    {
+      cat("chose to add:",variable,"\n")
+      prev_vif = vif_value
+      next
+    }
+    else if( deleted != '0')
+    {
+      index = which( nm == deleted )
+      inputs = inputs[ - which(inputs == index)  ]
+      reg = lm( interpolated_acetic~., train[,c(inputs,target_index)] )
+      prev_vif = vif( reg )
+    }
+    else
+    {
+      next
+    }
+  }
+  return (inputs)
+}
+```
+
+
+
+```{r}
+inputs = forward_selection( denoise_combine , imp = imp , auto = TRUE ,change_thres = 8 , remain_thres = 10 , delete_thres = 15 )
+length(inputs)
+```
+
+```{r}
+new = inputs[1]
+for ( element in inputs[-1])
+  new = paste(new, element, sep = ',')
+```
+

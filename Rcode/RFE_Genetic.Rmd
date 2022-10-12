@@ -1,0 +1,83 @@
+---
+title: "RFE and Genetic selection"
+author: "Peian"
+date: '2022-07-14'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Recursive Feature Elimination
+```{r}
+ctrl = rfeControl(functions = lmFuncs,
+                   method = "repeatedcv",
+                   repeats = 5,
+                   verbose = FALSE)
+lmProfile = rfe(train[,-p], train[,p], rfeControl = ctrl , size = subsets)
+lmProfile$results
+lmProfile$fit
+predictors(lmProfile)
+plot(lmProfile)
+varImp(lmProfile)
+```
+
+```{r}
+subsets = seq( 6, 30, by = 3 )
+ctrl = rfeControl(functions=rfFuncs, method="repeatedcv", number=5 , repeats = 2)
+# run the RFE algorithm
+rfProfile = rfe( interpolated_acetic ~. -EFT_H , 
+                 data = train,
+                 ntree = 100,
+                 tuneLength = 3,
+                 sizes = subsets , 
+                 rfeControl = ctrl )
+# summarize the results
+print(rfProfile)
+# list the chosen features
+predictors(rfProfile)
+# plot the results
+plot(rfProfile, type=c("g", "o"))
+```
+## Genetic Selection
+```{r}
+p = ncol(train)
+ctrl = gafsControl(functions = caretGA , method = 'repeatedcv' , repeats = 2 , allowParallel = TRUE)
+cl = makeCluster(cpu )
+registerDoParallel(cl)
+x = as.matrix( train[,-p])
+y = train[,p]
+obj = gafs(x = x, 
+            y = y,
+            iters = 3,
+            gafsControl = ctrl,
+            ## Now pass options to `train`
+            method = "lm")
+stopCluster(cl)
+```
+
+
+```{r}
+plot(obj) + theme_bw()
+```
+
+
+```{r}
+p = ncol(train)
+x = as.matrix( train[,-p])
+y = train[,p]
+ctrl = safsControl(functions = rfSA ,  allowParallel = TRUE )
+cl = makeCluster( cpu )
+registerDoParallel(cl)
+obj = safs(x = x, 
+            y = y,
+            iters = 2,
+            safsControl = ctrl
+            ## Now pass options to `train`
+            # method = 'rf'
+)
+stopCluster(cl)
+```
+

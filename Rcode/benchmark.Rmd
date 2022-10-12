@@ -1,0 +1,175 @@
+---
+title: "BenchMarking"
+author: "Peian"
+date: '2022-06-30'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+#library(tidyr)
+library(purrr)
+library(parallel)
+library(parallelMap)
+library(mlr)
+library(tidyverse)
+library(car)
+library(forecast)
+require(gam)
+require(monomvn)
+require(LearnBayes)
+require(glmnet)
+require(nortest)
+library(earth)
+set.seed(1)
+```
+
+
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 200)
+data19 = temp$data_19
+ac19 = temp$ac_19
+#data19 = dplyr:: select( data19 , c(optical.density,ammonia.pump.flow.1,interpolated_acetic) ) 
+```
+
+
+#Penalized regression
+```{r}
+ridge = makeLearner("regr.glmnet", alpha = 0, id = "ridge")
+ridgeParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 15))
+
+lasso = makeLearner("regr.glmnet", alpha = 1, id = "lasso")
+lassoParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 15))
+
+randSearch = makeTuneControlRandom(maxit = 30)
+
+elastic = makeLearner("regr.glmnet", id = "elastic")
+elasticParamSpace = makeParamSet(
+makeNumericParam("s", lower = 0, upper = 10),
+makeNumericParam("alpha", lower = 0, upper = 1))
+
+randSearchElastic = makeTuneControlRandom(maxit = 40)
+
+```
+
+### Tree
+```{r}
+tree = makeLearner("regr.rpart" , id ='regression tree')
+
+treeParamSpace = makeParamSet(
+makeIntegerParam("minsplit", lower = 5, upper = 20),
+makeIntegerParam("minbucket", lower = 3, upper = 10),
+makeNumericParam("cp", lower = 0.01, upper = 0.1),
+makeIntegerParam("maxdepth", lower = 3, upper = 10)
+)
+
+xgb = makeLearner("regr.xgboost")
+
+xgbParamSpace = makeParamSet(
+makeNumericParam("eta", lower = 0, upper = 1),
+makeNumericParam("gamma", lower = 0, upper = 5),
+makeIntegerParam("max_depth", lower = 1, upper = 5),
+makeNumericParam("min_child_weight", lower = 1, upper = 10),
+makeNumericParam("subsample", lower = 0.5, upper = 1),
+makeNumericParam("colsample_bytree", lower = 0.5, upper = 1),
+makeIntegerParam("nrounds", lower = 20, upper = 20)
+)
+randSearchXgboost = makeTuneControlRandom(maxit = 20)
+
+```
+
+### MARS
+```{r}
+mars = makeLearner("regr.earth" , id ='mars')
+marsParamSpace = makeParamSet(
+makeIntegerParam( "degree" ,  lower = 1 , upper = 3 ),
+makeIntegerParam("nprune", lower=5, upper = 50 )
+)
+```
+
+
+
+
+
+```{r}
+cvForTuning = makeResampleDesc("RepCV", folds = 3, reps = 2)
+```
+
+### Define Wrapper
+```{r}
+ridgeWrapper = makeTuneWrapper(ridge, resampling = cvForTuning,
+par.set = ridgeParamSpace,
+control = randSearch)
+lassoWrapper = makeTuneWrapper(lasso, resampling = cvForTuning,
+par.set = lassoParamSpace,
+control = randSearch)
+elasticWrapper = makeTuneWrapper(elastic, resampling = cvForTuning,
+par.set = elasticParamSpace,
+control = randSearchElastic)
+
+### Tree
+treeWrapper = makeTuneWrapper(tree, resampling = cvForTuning,
+par.set = treeParamSpace,
+control = randSearch)
+
+xgbWrapper = makeTuneWrapper(xgb, resampling = cvForTuning,
+par.set = xgbParamSpace,
+control = randSearchXgboost)
+
+### MARS
+marsWrapper = makeTuneWrapper(mars, resampling = cvForTuning,
+par.set = marsParamSpace,
+control = randSearch)
+
+```
+
+## Define Learners
+```{r}
+aceticTask = makeRegrTask(data = data19, target = "interpolated_acetic")
+# ony ridge,lasso,elastic
+# learners = list( ridgeWrapper,lassoWrapper,elasticWrapper, 
+#                 tree, xgbWrapper,
+#                 marsWrapper,
+#                 "regr.lm","regr.ksvm","regr.svm","regr.plsr" , "regr.randomForest"
+#                 )
+learners = list( "regr.ksvm","regr.svm","regr.plsr" , "regr.randomForest" )
+kFold3 = makeResampleDesc("CV", iters = 2 )
+start = Sys.time()
+parallelStartSocket(cpus = detectCores())
+bench = benchmark(learners, aceticTask, kFold3 , models =   TRUE)
+parallelStop()
+end = Sys.time()
+cat("running time is: ", (end - start ) )
+bench
+```
+
+```{r}
+mol = getBMRModels( bench )
+getLearnerModel(mol$data19$ridge.tuned[[1]])
+tree_submodel= getLearnerModel(mol$data19$`regression tree`[[2]])
+getLearnerModel( mol$data19$regr.xgboost.tuned[[1]])
+
+rpart.plot(tree_submodel, roundint = FALSE,
+box.palette = "BuBn",
+type = 5)
+```
+
+```{r}
+pred = getBMRPredictions( bench , as.df = TRUE)
+pred
+```
+
+#Go
+```{r}
+
+```
+

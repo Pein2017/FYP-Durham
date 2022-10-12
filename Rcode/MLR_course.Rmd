@@ -28,7 +28,7 @@ library(purrr)
 data frames:
 
 ```{r}
-myTib <- tibble(x = 1:4,
+myTib = tibble(x = 1:4,
 y = c("london", "beijing", "las vegas", "berlin"))
 ```
 
@@ -39,9 +39,9 @@ denotes a character variable, <dbl> denotes a floating-point number
 ## Converting existing data frames into tibbles
 
 ```{r}
-myDf <- data.frame(x = 1:4,
+myDf = data.frame(x = 1:4,
 y = c("london", "beijing", "las vegas", "berlin"))
-dfToTib <- as_tibble(myDf)
+dfToTib = as_tibble(myDf)
 ```
 
 ## DPLYR
@@ -58,31 +58,31 @@ of the columns we wish to select, separated by commas.
 ```{r}
 library(tibble)
 data(CO2)
-CO2tib <- as_tibble(CO2)
+CO2tib = as_tibble(CO2)
 
 library(dplyr)
-selectedData <- select(CO2tib, 1, 2, 3, 5)
+selectedData = select(CO2tib, 1, 2, 3, 5)
 selectedData
 ```
 
 ### Filter ( by some conditions, similar to which)
 
 ```{r}
-filteredData <- filter(selectedData, uptake > 16)
+filteredData = filter(selectedData, uptake > 16)
 filteredData
 ```
 
 ### Group by
 
 ```{r}
-groupedData <- group_by(filteredData, Plant)
+groupedData = group_by(filteredData, Plant)
 groupedData
 ```
 
 ### Summarize
 
 ```{r}
-summarizedData <- summarize(groupedData, meanUp = mean(uptake),
+summarizedData = summarize(groupedData, meanUp = mean(uptake),
 sdUp = sd(uptake))
 summarizedData
 ```
@@ -90,14 +90,14 @@ summarizedData
 ### Mutate
 
 ```{r}
-mutatedData <- mutate(summarizedData, CV = (sdUp / meanUp) * 100)
+mutatedData = mutate(summarizedData, CV = (sdUp / meanUp) * 100)
 mutatedData
 ```
 
 ### Arrange(Similar to order() )
 
 ```{r}
-arrangedData <- arrange(mutatedData, CV)  
+arrangedData = arrange(mutatedData, CV)  
 arrangedData
 arrange(mutatedData, desc(CV) )
 ```
@@ -105,7 +105,7 @@ arrange(mutatedData, desc(CV) )
 ## Pipeline operator %\>%
 
 ```{r}
-arrangedData <- CO2tib %>%
+arrangedData = CO2tib %>%
 select(c(1:3, 5)) %>%
 filter(uptake > 16) %>%
 group_by(Plant) %>%
@@ -125,7 +125,7 @@ based on the data
 ```{r}
 library(ggplot2)
 data(iris)
-myPlot <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
+myPlot = ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width)) +
 geom_point() +
 theme_bw()
 myPlot
@@ -173,13 +173,13 @@ effect** of the function. A function that does not produce any side
 effects is said to be a **pure function**.
 
 ```{r}
-a <- 20
-pure <- function() {
-a <- a + 1
+a = 20
+pure = function() {
+a = a + 1
 a
 }
-side_effect <- function() {
-a <<- a + 1  ##   must be <<-
+side_effect = function() {
+a <= a + 1  ##   must be <=
 a
 }
 c(pure(), pure())
@@ -190,7 +190,7 @@ c(side_effect(), side_effect())
 ### Replacing for loops with map()
 
 ```{r}
-listOfNumerics <- list(a = rnorm(5),
+listOfNumerics = list(a = rnorm(5),
 b = rnorm(9),
 c = rnorm(10))
 ```
@@ -200,9 +200,9 @@ elements separately, such as the **length()** function to return the
 length of each element.
 
 ```{r}
-elementLengths <- vector("list", length = 3)
+elementLengths = vector("list", length = 3)
 for(i in seq_along(listOfNumerics)) {
-elementLengths[[i]] <- length(listOfNumerics[[i]])
+elementLengths[[i]] = length(listOfNumerics[[i]])
 }
 elementLengths
 ```
@@ -261,7 +261,7 @@ iwalk(listOfNumerics, ~hist(.x, main = .y))
 ### Iterating over multiple lists simultaneously map2() pairwise operation
 
 ```{r}
-multipliers <- list(0.5, 10, 3)
+multipliers = list(0.5, 10, 3)
 map2(.x = listOfNumerics, .y = multipliers, ~.x * .y)   
 ## pairwise product
 ```
@@ -269,7 +269,7 @@ map2(.x = listOfNumerics, .y = multipliers, ~.x * .y)
 ### Using pmap() to iterate over multiple lists
 
 ```{r}
-arguments <- expand.grid(n = c(50,100),
+arguments = expand.grid(n = c(50,100),
 mean = c(1, 10),
 sd = c(1, 10))
 arguments
@@ -289,7 +289,7 @@ library(tidyverse)
 
 ```{r}
 data(diabetes, package = "mclust")
-diabetesTib <- as_tibble(diabetes)
+diabetesTib = as_tibble(diabetes)
 summary(diabetesTib)
 ```
 
@@ -320,7 +320,7 @@ to make future predictions.
 ##Telling mlr what we're trying to achieve: Defining the task
 
 ```{r}
-diabetesTask <- makeClassifTask(data = diabetesTib, target = "class")
+diabetesTask = makeClassifTask(data = diabetesTib, target = "class")
 
 ```
 
@@ -336,14 +336,14 @@ wish to use to control the algorithm
 We use the `makeLearner()` function to define a learner.
 
 ```{r}
-knn <- makeLearner("classif.knn", par.vals = list("k" = 2))
+knn = makeLearner("classif.knn", par.vals = list("k" = 2))
 ```
 
 ## Putting it all together: Training the model
 
 ```{r}
-knnModel <- train(knn, diabetesTask)
-knnPred <- predict(knnModel, newdata = diabetesTib)
+knnModel = train(knn, diabetesTask)
+knnPred = predict(knnModel, newdata = diabetesTib)
 
 ```
 
@@ -357,14 +357,14 @@ performance(knnPred, measures = list(mmce, acc))
 ### Cross-validating our kNN model
 
 ```{r}
-diabetesTask <- makeClassifTask(data = diabetesTib, target = "class")
-knn <- makeLearner("classif.knn", par.vals = list("k" = 2))
+diabetesTask = makeClassifTask(data = diabetesTib, target = "class")
+knn = makeLearner("classif.knn", par.vals = list("k" = 2))
 ```
 
 ### MAKING A HOLDOUT RESAMPLING DESCRIPTION
 
 ```{r}
-holdout <- makeResampleDesc(method = "Holdout", split = 2/3,
+holdout = makeResampleDesc(method = "Holdout", split = 2/3,
 stratify = TRUE)
 ```
 
@@ -373,7 +373,7 @@ stratify = TRUE)
 ### PERFORMING HOLDOUT CV
 
 ```{r}
-holdoutCV <- resample(learner = knn, task = diabetesTask,
+holdoutCV = resample(learner = knn, task = diabetesTask,
 resampling = holdout, measures = list(mmce, acc))
 ```
 
@@ -393,9 +393,9 @@ to average across! Again, we ask for the classes to be stratified among
 the folds:
 
 ```{r}
-kFold <- makeResampleDesc(method = "RepCV", folds = 10, reps = 50,
+kFold = makeResampleDesc(method = "RepCV", folds = 10, reps = 50,
 stratify = TRUE)
-kFoldCV <- resample(learner = knn, task = diabetesTask,
+kFoldCV = resample(learner = knn, task = diabetesTask,
 resampling = kFold, measures = list(mmce, acc))
 kFoldCV$aggr
 
@@ -405,8 +405,8 @@ calculateConfusionMatrix(kFoldCV$pred, relative = TRUE)
 ### Leave-one-out cross-validation
 
 ```{r}
-LOO <- makeResampleDesc(method = "LOO")
-LOOCV <- resample(learner = knn, task = diabetesTask, resampling = LOO,
+LOO = makeResampleDesc(method = "LOO")
+LOOCV = resample(learner = knn, task = diabetesTask, resampling = LOO,
 measures = list(mmce, acc))
 LOOCV$aggr
 calculateConfusionMatrix(LOOCV$pred, relative = TRUE)
@@ -416,17 +416,17 @@ calculateConfusionMatrix(LOOCV$pred, relative = TRUE)
 ## Tuning k to improve the model
 
 ```{r}
-knnParamSpace <- makeParamSet(makeDiscreteParam("k", values = 1:10))
+knnParamSpace = makeParamSet(makeDiscreteParam("k", values = 1:10))
 
-gridSearch <- makeTuneControlGrid()
+gridSearch = makeTuneControlGrid()
 
-cvForTuning <- makeResampleDesc("RepCV", folds = 10, reps = 20)
+cvForTuning = makeResampleDesc("RepCV", folds = 10, reps = 20)
 
 ```
 
 ```{r}
 
-tunedK <- tuneParams("classif.knn", task = diabetesTask,
+tunedK = tuneParams("classif.knn", task = diabetesTask,
 resampling = cvForTuning,
 par.set = knnParamSpace, control = gridSearch)
 
@@ -440,16 +440,16 @@ tunedK$x
 ### visualize the tuning process
 
 ```{r}
-knnTuningData <- generateHyperParsEffectData(tunedK)
+knnTuningData = generateHyperParsEffectData(tunedK)
 plotHyperParsEffect(knnTuningData, x = "k", y = "mmce.test.mean",
 plot.type = "line") +
 theme_bw()
 ```
 
 ```{r}
-tunedKnn <- setHyperPars(makeLearner("classif.knn"),
+tunedKnn = setHyperPars(makeLearner("classif.knn"),
 par.vals = tunedK$x)
-tunedKnnModel <- train(tunedKnn, diabetesTask)
+tunedKnnModel = train(tunedKnn, diabetesTask)
 tunedKnnModel
 ```
 
@@ -459,8 +459,8 @@ tunedKnnModel
 
 ```{r}
 data(Ozone, package = "mlbench")
-ozoneTib <- as_tibble(Ozone)
-names(ozoneTib) <- c("Month", "Date", "Day", "Ozone", "Press_height",
+ozoneTib = as_tibble(Ozone)
+names(ozoneTib) = c("Month", "Date", "Day", "Ozone", "Press_height",
 "Wind", "Humid", "Temp_Sand", "Temp_Monte",
 "Inv_height", "Press_grad", "Inv_temp", "Visib")
 ozoneTib
@@ -469,7 +469,7 @@ ozoneTib
 ### clean data
 
 ```{r}
-ozoneClean <- mutate_all(ozoneTib, as.numeric) %>%
+ozoneClean = mutate_all(ozoneTib, as.numeric) %>%
 filter(is.na(Ozone) == FALSE)
 ozoneClean
 ```
@@ -477,7 +477,7 @@ ozoneClean
 ### plot
 
 ```{r}
-ozoneUntidy <- gather(ozoneClean, key = "Variable",
+ozoneUntidy = gather(ozoneClean, key = "Variable",
 value = "Value", -Ozone)
 ggplot(ozoneUntidy, aes(Value, Ozone)) +
 facet_wrap(~ Variable, scale = "free_x") +
@@ -490,8 +490,8 @@ theme_bw()
 ### Using rpart to impute missing values
 
 ```{r}
-imputeMethod <- imputeLearner("regr.rpart")
-ozoneImp <- impute(as.data.frame(ozoneClean),
+imputeMethod = imputeLearner("regr.rpart")
+ozoneImp = impute(as.data.frame(ozoneClean),
 classes = list(numeric = imputeMethod))
 ```
 
@@ -500,8 +500,8 @@ classes = list(numeric = imputeMethod))
 Use *makeRegrTask()* and *makeClusterTask()* to specify task
 
 ```{r}
-ozoneTask <- makeRegrTask(data = ozoneImp$data, target = "Ozone")
-lin <- makeLearner("regr.lm")
+ozoneTask = makeRegrTask(data = ozoneImp$data, target = "Ozone")
+lin = makeLearner("regr.lm")
 ```
 
 ## Feature selection
@@ -517,18 +517,18 @@ outcomes are categorical or continuous (the default)
 ### Using a filter method for feature selection
 
 ```{r}
-filterVals <- generateFilterValuesData(ozoneTask,
+filterVals = generateFilterValuesData(ozoneTask,
 method = "linear.correlation")
 arrange(filterVals$data , desc(value ) )
 plotFilterValues(filterVals) + theme_bw()
 ```
 
 ```{r}
-#ozoneFiltTask <- filterFeatures(ozoneTask,
+#ozoneFiltTask = filterFeatures(ozoneTask,
 # fval = filterVals, abs = 6)
-#ozoneFiltTask <- filterFeatures(ozoneTask,
+#ozoneFiltTask = filterFeatures(ozoneTask,
 # fval = filterVals, per = 0.25)
-#ozoneFiltTask <- filterFeatures(ozoneTask,
+#ozoneFiltTask = filterFeatures(ozoneTask,
 # fval = filterVals, threshold = 0.2)
 ```
 
@@ -544,12 +544,12 @@ fw.method = "linear.correlation" )
 ### Tuning the number of predictors to retain
 
 ```{r}
-lmParamSpace <- makeParamSet(
+lmParamSpace = makeParamSet(
 makeIntegerParam("fw.abs", lower = 1, upper = 12)
 )
-gridSearch <- makeTuneControlGrid()
-kFold <- makeResampleDesc("CV", iters = 10)
-tunedFeats <- tuneParams(filterWrapper, task = ozoneTask, resampling = kFold,
+gridSearch = makeTuneControlGrid()
+kFold = makeResampleDesc("CV", iters = 10)
+tunedFeats = tuneParams(filterWrapper, task = ozoneTask, resampling = kFold,
 par.set = lmParamSpace, control = gridSearch)
 tunedFeats
 ```
@@ -557,9 +557,9 @@ tunedFeats
 ### Training the model with filtered features
 
 ```{r}
-filteredTask <- filterFeatures(ozoneTask, fval = filterVals,
+filteredTask = filterFeatures(ozoneTask, fval = filterVals,
 abs = unlist(tunedFeats$x) )
-filteredModel <- train(lin, filteredTask)
+filteredModel = train(lin, filteredTask)
 ```
 
 ### Wrapper method
@@ -567,8 +567,8 @@ filteredModel <- train(lin, filteredTask)
 ### Using a wrapper method for feature selection
 
 ```{r}
-featSelControl <- makeFeatSelControlSequential(method = "sfbs")
-selFeats <- selectFeatures(learner = lin, task = ozoneTask,
+featSelControl = makeFeatSelControlSequential(method = "sfbs")
+selFeats = selectFeatures(learner = lin, task = ozoneTask,
 resampling = kFold, control = featSelControl)
 selFeats
 ```
@@ -576,18 +576,18 @@ selFeats
 ### Using a wrapper method for feature selection
 
 ```{r}
-ozoneSelFeat <- ozoneImp$data[, c("Ozone", selFeats$x)]
-ozoneSelFeatTask <- makeRegrTask(data = ozoneSelFeat, target = "Ozone")
-wrapperModel <- train(lin, ozoneSelFeatTask)
+ozoneSelFeat = ozoneImp$data[, c("Ozone", selFeats$x)]
+ozoneSelFeatTask = makeRegrTask(data = ozoneSelFeat, target = "Ozone")
+wrapperModel = train(lin, ozoneSelFeatTask)
 ```
 
 ## Combining imputation and feature selection wrappers
 
 ```{r}
-imputeMethod <- imputeLearner("regr.rpart")
-imputeWrapper <- makeImputeWrapper(lin,
+imputeMethod = imputeLearner("regr.rpart")
+imputeWrapper = makeImputeWrapper(lin,
 classes = list(numeric = imputeMethod))
-featSelWrapper <- makeFeatSelWrapper(learner = imputeWrapper,
+featSelWrapper = makeFeatSelWrapper(learner = imputeWrapper,
 resampling = kFold,
 control = featSelControl)
 ```
@@ -600,10 +600,10 @@ library(parallelMap)
 ### Cross-validating the model-building process
 
 ```{r}
-ozoneTaskWithNAs <- makeRegrTask(data = ozoneClean, target = "Ozone")
-kFold3 <- makeResampleDesc("CV", iters = 3)
+ozoneTaskWithNAs = makeRegrTask(data = ozoneClean, target = "Ozone")
+kFold3 = makeResampleDesc("CV", iters = 3)
 parallelStartSocket(cpus = detectCores())
-lmCV <- resample(featSelWrapper, ozoneTaskWithNAs, resampling = kFold3)
+lmCV = resample(featSelWrapper, ozoneTaskWithNAs, resampling = kFold3)
 parallelStop()
 lmCV
 ```
@@ -619,7 +619,7 @@ outer folds. 4 Return the mean MSE to give us our estimate of
 performance. \## Interpreting the model \### Interpreting
 
 ```{r}
-wrapperModelData <- getLearnerModel(wrapperModel)
+wrapperModelData = getLearnerModel(wrapperModel)
 summary(wrapperModelData)
 ```
 
@@ -650,7 +650,7 @@ interaction(1:4, c("a", "b", "c", "d")) \### Creating an interaction
 between Date and Month
 
 ```{r}
-ozoneForGam <- mutate(ozoneClean,
+ozoneForGam = mutate(ozoneClean,
 DayOfYear = as.numeric(interaction(Date, Month))) %>%
 dplyr::select(c(-"Date", -"Month"))
 ggplot(ozoneForGam, aes(DayOfYear, Ozone)) +
@@ -662,13 +662,13 @@ theme_bw()
 ### Defining the task and wrappers
 
 ```{r}
-gamTask <- makeRegrTask(data = ozoneForGam, target = "Ozone")
-imputeMethod <- imputeLearner("regr.rpart")
-gamImputeWrapper <- makeImputeWrapper("regr.gamboost",
+gamTask = makeRegrTask(data = ozoneForGam, target = "Ozone")
+imputeMethod = imputeLearner("regr.rpart")
+gamImputeWrapper = makeImputeWrapper("regr.gamboost",
 classes = list(numeric = imputeMethod))
-gamFeatSelControl <- makeFeatSelControlSequential(method = "sfbs")
-kFold <- makeResampleDesc("CV", iters = 2)
-gamFeatSelWrapper <- makeFeatSelWrapper(learner = gamImputeWrapper,
+gamFeatSelControl = makeFeatSelControlSequential(method = "sfbs")
+kFold = makeResampleDesc("CV", iters = 2)
+gamFeatSelWrapper = makeFeatSelWrapper(learner = gamImputeWrapper,
 resampling = kFold,
 control = gamFeatSelControl)
 ```
@@ -676,8 +676,8 @@ control = gamFeatSelControl)
 ### Cross-validating the GAM model-building process
 
 ```{r}
-holdout <- makeResampleDesc("Holdout")
-gamCV <- resample(gamFeatSelWrapper, gamTask, resampling = holdout)
+holdout = makeResampleDesc("Holdout")
+gamCV = resample(gamFeatSelWrapper, gamTask, resampling = holdout)
 gamCV
 ```
 
@@ -687,9 +687,9 @@ gamCV
 library(parallel)
 library(parallelMap)
 parallelStartSocket(cpus = detectCores())
-gamModel <- train(gamFeatSelWrapper, gamTask)
+gamModel = train(gamFeatSelWrapper, gamTask)
 parallelStop()
-gamModelData <- getLearnerModel(gamModel, more.unwrap = TRUE)
+gamModelData = getLearnerModel(gamModel, more.unwrap = TRUE)
 ```
 
 ### Plotting our GAM
@@ -704,21 +704,21 @@ par(mfrow = c(1, 1))
 
 ```
 ```{r}
-filterWrapperImp <- makeFilterWrapper(learner = gamImputeWrapper,
+filterWrapperImp = makeFilterWrapper(learner = gamImputeWrapper,
                                    fw.method = "linear.correlation")
 
-filterParam <- makeParamSet(
+filterParam = makeParamSet(
   makeIntegerParam("fw.abs", lower = 1, upper = 12)
 )
 
-gridSearch <- makeTuneControlGrid()
+gridSearch = makeTuneControlGrid()
 
-tuneWrapper <- makeTuneWrapper(learner = filterWrapperImp,
+tuneWrapper = makeTuneWrapper(learner = filterWrapperImp,
                                resampling = kFold,
                                par.set = filterParam,
                                control = gridSearch)
 
-filterGamCV <- resample(tuneWrapper, gamTask, resampling = holdout)
+filterGamCV = resample(tuneWrapper, gamTask, resampling = holdout)
 
 filterGamCV
 ```
@@ -747,14 +747,14 @@ Loading and exploring the Iowa dataset
 
 ```{r}
 data(Iowa, package = "lasso2")
-iowaTib <- as_tibble(Iowa)
+iowaTib = as_tibble(Iowa)
 iowaTib
 ```
 
 ### Plotting the data
 
 ```{r}
-iowaUntidy <- gather(iowaTib, "Variable", "Value", -Yield)
+iowaUntidy = gather(iowaTib, "Variable", "Value", -Yield)
 ggplot(iowaUntidy, aes(Value, Yield)) +
 facet_wrap(~ Variable, scales = "free_x") +
 geom_point() +
@@ -772,28 +772,28 @@ the same glmnet function, we'll get an error because they won't each
 have a unique identifier.
 
 ```{r}
-iowaTask <- makeRegrTask(data = iowaTib, target = "Yield")
-ridge <- makeLearner("regr.glmnet", alpha = 0, id = "ridge")
+iowaTask = makeRegrTask(data = iowaTib, target = "Yield")
+ridge = makeLearner("regr.glmnet", alpha = 0, id = "ridge")
 ```
 
 ### Generating and plotting filter values
 
 ```{r}
-filterVals <- generateFilterValuesData(iowaTask)
+filterVals = generateFilterValuesData(iowaTask)
 plotFilterValues(filterVals) + theme_bw()
 ```
 
 ### Tuning the lambda (s) hyperparameter
 
 ```{r}
-ridgeParamSpace <- makeParamSet(
+ridgeParamSpace = makeParamSet(
 makeNumericParam("s", lower = 0, upper = 15))
-randSearch <- makeTuneControlRandom(maxit = 200)
-cvForTuning <- makeResampleDesc("RepCV", folds = 3, reps = 10)
+randSearch = makeTuneControlRandom(maxit = 200)
+cvForTuning = makeResampleDesc("RepCV", folds = 3, reps = 10)
 library(parallel)
 library(parallelMap)
 parallelStartSocket(cpus = detectCores())
-tunedRidgePars <- tuneParams(ridge, task = iowaTask,
+tunedRidgePars = tuneParams(ridge, task = iowaTask,
 resampling = cvForTuning,
 par.set = ridgeParamSpace,
 control = randSearch)
@@ -803,7 +803,7 @@ parallelStop()
 ### Plotting the hyperparameter tuning process
 
 ```{r}
-ridgeTuningData <- generateHyperParsEffectData(tunedRidgePars)
+ridgeTuningData = generateHyperParsEffectData(tunedRidgePars)
 plotHyperParsEffect(ridgeTuningData, x = "s", y = "mse.test.mean",
 plot.type = "line") +
 theme_bw()
@@ -812,15 +812,15 @@ theme_bw()
 ### Training a ridge regression model using the tuned lambda
 
 ```{r}
-tunedRidge <- setHyperPars(ridge, par.vals = tunedRidgePars$x)
-tunedRidgeModel <- train(tunedRidge, iowaTask)
+tunedRidge = setHyperPars(ridge, par.vals = tunedRidgePars$x)
+tunedRidgeModel = train(tunedRidge, iowaTask)
 ```
 
 ### Extracting the model parameters
 
 ```{r}
-ridgeModelData <- getLearnerModel(tunedRidgeModel)
-ridgeCoefs <- coef(ridgeModelData, s = tunedRidgePars$x$s)
+ridgeModelData = getLearnerModel(tunedRidgeModel)
+ridgeCoefs = coef(ridgeModelData, s = tunedRidgePars$x$s)
 ridgeCoefs
 ```
 
@@ -829,11 +829,11 @@ ridgeCoefs
 See the shrinkage effect
 
 ```{r}
-lmCoefs <- coef(lm(Yield ~ ., data = iowaTib))
-coefTib <- tibble(Coef = rownames(ridgeCoefs)[-1],
+lmCoefs = coef(lm(Yield ~ ., data = iowaTib))
+coefTib = tibble(Coef = rownames(ridgeCoefs)[-1],
 Ridge = as.vector(ridgeCoefs)[-1],
 Lm = as.vector(lmCoefs)[-1])
-coefUntidy <- gather(coefTib, key = Model, value = Beta, -Coef)
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
 ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
 geom_bar(stat = "identity", col = "black") +
 facet_wrap(~Model) +
@@ -846,11 +846,11 @@ theme(legend.position = "none")
 ### Tuning lambda for LASSO
 
 ```{r}
-lasso <- makeLearner("regr.glmnet", alpha = 1, id = "lasso")
-lassoParamSpace <- makeParamSet(
+lasso = makeLearner("regr.glmnet", alpha = 1, id = "lasso")
+lassoParamSpace = makeParamSet(
 makeNumericParam("s", lower = 0, upper = 15))
 parallelStartSocket(cpus = detectCores())
-tunedLassoPars <- tuneParams(lasso, task = iowaTask,
+tunedLassoPars = tuneParams(lasso, task = iowaTask,
 resampling = cvForTuning,
 par.set = lassoParamSpace,
 control = randSearch)
@@ -861,7 +861,7 @@ tunedLassoPars
 ### Plotting the hyperparameter tuning process
 
 ```{r}
-lassoTuningData <- generateHyperParsEffectData(tunedLassoPars)
+lassoTuningData = generateHyperParsEffectData(tunedLassoPars)
 plotHyperParsEffect(lassoTuningData, x = "s", y = "mse.test.mean",
 plot.type = "line") +
 theme_bw()
@@ -870,23 +870,23 @@ theme_bw()
 ### Training a LASSO model using the tuned lambda
 
 ```{r}
-tunedLasso <- setHyperPars(lasso, par.vals = tunedLassoPars$x)
-tunedLassoModel <- train(tunedLasso, iowaTask)
+tunedLasso = setHyperPars(lasso, par.vals = tunedLassoPars$x)
+tunedLassoModel = train(tunedLasso, iowaTask)
 ```
 
 ### Extracting the model parameters
 
 ```{r}
-lassoModelData <- getLearnerModel(tunedLassoModel)
-lassoCoefs <- coef(lassoModelData, s = tunedLassoPars$x$s)
+lassoModelData = getLearnerModel(tunedLassoModel)
+lassoCoefs = coef(lassoModelData, s = tunedLassoPars$x$s)
 lassoCoefs
 ```
 
 ### Plotting the model parameters
 
 ```{r}
-coefTib$LASSO <- as.vector(lassoCoefs)[-1]
-coefUntidy <- gather(coefTib, key = Model, value = Beta, -Coef)
+coefTib$LASSO = as.vector(lassoCoefs)[-1]
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
 ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
 geom_bar(stat = "identity", col = "black") +
 facet_wrap(~ Model) +
@@ -900,13 +900,13 @@ theme(legend.position = "none")
 ### Tuning lambda and alpha for elastic net
 
 ```{r}
-elastic <- makeLearner("regr.glmnet", id = "elastic")
-elasticParamSpace <- makeParamSet(
+elastic = makeLearner("regr.glmnet", id = "elastic")
+elasticParamSpace = makeParamSet(
 makeNumericParam("s", lower = 0, upper = 10),
 makeNumericParam("alpha", lower = 0, upper = 1))
-randSearchElastic <- makeTuneControlRandom(maxit = 400)
+randSearchElastic = makeTuneControlRandom(maxit = 400)
 parallelStartSocket(cpus = detectCores())
-tunedElasticPars <- tuneParams(elastic, task = iowaTask,
+tunedElasticPars = tuneParams(elastic, task = iowaTask,
 resampling = cvForTuning,
 par.set = elasticParamSpace,
 control = randSearchElastic)
@@ -918,7 +918,7 @@ tunedElasticPars
 ### Plotting the tuning process
 
 ```{r}
-elasticTuningData <- generateHyperParsEffectData(tunedElasticPars)
+elasticTuningData = generateHyperParsEffectData(tunedElasticPars)
 plotHyperParsEffect(elasticTuningData, x = "s", y = "alpha",
 z = "mse.test.mean", interpolate = "regr.kknn",
 plot.type = "heatmap") +
@@ -931,17 +931,17 @@ theme_bw()
 ### Training an elastic net model using tuned hyperparameters
 
 ```{r}
-tunedElastic <- setHyperPars(elastic, par.vals = tunedElasticPars$x)
-tunedElasticModel <- train(tunedElastic, iowaTask)
+tunedElastic = setHyperPars(elastic, par.vals = tunedElasticPars$x)
+tunedElasticModel = train(tunedElastic, iowaTask)
 ```
 
 ### Plotting the model parameters
 
 ```{r}
-elasticModelData <- getLearnerModel(tunedElasticModel)
-elasticCoefs <- coef(elasticModelData, s = tunedElasticPars$x$s)
-coefTib$Elastic <- as.vector(elasticCoefs)[-1]
-coefUntidy <- gather(coefTib, key = Model, value = Beta, -Coef)
+elasticModelData = getLearnerModel(tunedElasticModel)
+elasticCoefs = coef(elasticModelData, s = tunedElasticPars$x$s)
+coefTib$Elastic = as.vector(elasticCoefs)[-1]
+coefUntidy = gather(coefTib, key = Model, value = Beta, -Coef)
 ggplot(coefUntidy, aes(reorder(Coef, Beta), Beta, fill = Model)) +
 geom_bar(stat = "identity", position = "dodge", col = "black") +
 facet_wrap(~ Model) +
@@ -953,13 +953,13 @@ theme_bw()
 ###Plotting the model parameters
 
 ```{r}
-ridgeWrapper <- makeTuneWrapper(ridge, resampling = cvForTuning,
+ridgeWrapper = makeTuneWrapper(ridge, resampling = cvForTuning,
 par.set = ridgeParamSpace,
 control = randSearch)
-lassoWrapper <- makeTuneWrapper(lasso, resampling = cvForTuning,
+lassoWrapper = makeTuneWrapper(lasso, resampling = cvForTuning,
 par.set = lassoParamSpace,
 control = randSearch)
-elasticWrapper <- makeTuneWrapper(elastic, resampling = cvForTuning,
+elasticWrapper = makeTuneWrapper(elastic, resampling = cvForTuning,
 par.set = elasticParamSpace,
 control = randSearchElastic)
 learners = list(ridgeWrapper, lassoWrapper, elasticWrapper, "regr.lm")
@@ -971,9 +971,9 @@ learners = list(ridgeWrapper, lassoWrapper, elasticWrapper, "regr.lm")
 ```{r}
 library(parallel)
 library(parallelMap)
-kFold3 <- makeResampleDesc("CV", iters = 3)
+kFold3 = makeResampleDesc("CV", iters = 3)
 parallelStartSocket(cpus = detectCores())
-bench <- benchmark(learners, iowaTask, kFold3)
+bench = benchmark(learners, iowaTask, kFold3)
 parallelStop()
 bench
 ```
@@ -989,11 +989,11 @@ bench
 library(mlr)
 library(tidyverse)
 data("fuelsubset.task")
-fuel <- getTaskData(fuelsubset.task)
-fuelTib <- as_tibble(fuel)
+fuel = getTaskData(fuelsubset.task)
+fuelTib = as_tibble(fuel)
 fuelTib
 
-fuelUntidy <- fuelTib %>%
+fuelUntidy = fuelTib %>%
 mutate(id = 1:nrow(.)) %>%
 gather(key = "variable", value = "absorbance",
 c(-heatan, -h20, -id)) %>%
@@ -1027,15 +1027,15 @@ theme_bw()
 ### Defining the task and kNN learner
 ```{r}
 #library('kknn')
-fuelTask <- makeRegrTask(data = fuelTib, target = "heatan")
-kknn <- makeLearner("regr.kknn")
+fuelTask = makeRegrTask(data = fuelTib, target = "heatan")
+kknn = makeLearner("regr.kknn")
 ```
 ### Tuning K
 ```{r}
-kknnParamSpace <- makeParamSet(makeDiscreteLearnerParam("k", values = 1:12))
-gridSearch <- makeTuneControlGrid()
-kFold <- makeResampleDesc("CV", iters = 10)
-tunedK <- tuneParams(kknn, task = fuelTask,
+kknnParamSpace = makeParamSet(makeDiscreteLearnerParam("k", values = 1:12))
+gridSearch = makeTuneControlGrid()
+kFold = makeResampleDesc("CV", iters = 10)
+tunedK = tuneParams(kknn, task = fuelTask,
 resampling = kFold,
 par.set = kknnParamSpace,
 control = gridSearch)
@@ -1043,21 +1043,21 @@ tunedK
 ```
 ### Plot the tune process
 ```{r}
-knnTuningData <- generateHyperParsEffectData(tunedK)
+knnTuningData = generateHyperParsEffectData(tunedK)
 plotHyperParsEffect(knnTuningData, x = "k", y = "mse.test.mean",
 plot.type = "line") +
 theme_bw()
 ```
 ### Training with `setHyperPars()` function
 ```{r}
-tunedKnn <- setHyperPars(makeLearner("regr.kknn"), par.vals = tunedK$x)
-tunedKnnModel <- train(tunedKnn, fuelTask)
+tunedKnn = setHyperPars(makeLearner("regr.kknn"), par.vals = tunedK$x)
+tunedKnnModel = train(tunedKnn, fuelTask)
 ```
 
 
 ### Building your first random forest regression model
 ```{r}
-forest <- makeLearner("regr.randomForest")
+forest = makeLearner("regr.randomForest")
 ```
  `ntree` controls the number of individual trees to train. More trees is usually better until adding more doesn’t improve performance further
  `mtry` controls the number of predictor variables that are randomly sampled for
@@ -1069,16 +1069,16 @@ to have its own leaf.
 
 ### Hyperparameter Tuning for random forest 
 ```{r}
-forestParamSpace <- makeParamSet(
+forestParamSpace = makeParamSet(
 makeIntegerParam("ntree", lower = 50, upper = 50),
 makeIntegerParam("mtry", lower = 100, upper = 367),
 makeIntegerParam("nodesize", lower = 1, upper = 10),
 makeIntegerParam("maxnodes", lower = 5, upper = 30))
-randSearch <- makeTuneControlRandom(maxit = 100)
+randSearch = makeTuneControlRandom(maxit = 100)
 library(parallel)
 library(parallelMap)
 parallelStartSocket(cpus = detectCores())
-tunedForestPars <- tuneParams(forest, task = fuelTask,
+tunedForestPars = tuneParams(forest, task = fuelTask,
 resampling = kFold,
 par.set = forestParamSpace,
 control = randSearch)
@@ -1088,15 +1088,15 @@ tunedForestPars
 ### Training the model and plotting the out-of-bag error 
 It’s a good idea to extract the model information and pass this to the plot() function to plot the `out-of-bag error`. Recall from chapter 8 that the out-of-bag error is the mean prediction error for each case by trees that did not include that case in their bootstrap sample.
 ```{r}
-tunedForest <- setHyperPars(forest, par.vals = tunedForestPars$x)
-tunedForestModel <- train(tunedForest, fuelTask)
-forestModelData <- getLearnerModel(tunedForestModel)
+tunedForest = setHyperPars(forest, par.vals = tunedForestPars$x)
+tunedForestModel = train(tunedForest, fuelTask)
+forestModelData = getLearnerModel(tunedForestModel)
 plot(forestModelData)
 ```
 It looks like the out-of-bag error `stabilizes` after 30–40 bagged trees, so we can be satisfied that we have included enough trees in our forest. 
 ## Building your first XGBoost regression model
 ```{r}
-xgb <- makeLearner("regr.xgboost")
+xgb = makeLearner("regr.xgboost")
 ```
  `eta` is known as the learning rate. It takes a value between 0 and 1, which is multiplied by the model weight of each tree to slow down the learning process to prevent overfitting.
  `gamma` is the minimum amount of splitting by which a node must improve the
@@ -1114,7 +1114,7 @@ respectively.
 ### Hyperparameter tuning for XGBoost
 ```{r}
 
-xgbParamSpace <- makeParamSet(
+xgbParamSpace = makeParamSet(
 makeNumericParam("eta", lower = 0, upper = 1),
 makeNumericParam("gamma", lower = 0, upper = 10),
 makeIntegerParam("max_depth", lower = 1, upper = 20),
@@ -1125,7 +1125,7 @@ makeIntegerParam("nrounds", lower = 30, upper = 30))
 library(parallel)
 library(parallelMap)
 parallelStartSocket(cpus = detectCores())
-tunedXgbPars <- tuneParams(xgb, task = fuelTask,
+tunedXgbPars = tuneParams(xgb, task = fuelTask,
 resampling = kFold,
 par.set = xgbParamSpace,
 control = randSearch)
@@ -1135,9 +1135,9 @@ tunedXgbPars
 ```
 ### Training the model and plotting RMSE against tree number
 ```{r}
-tunedXgb <- setHyperPars(xgb, par.vals = tunedXgbPars$x)
-tunedXgbModel <- train(tunedXgb, fuelTask)
-xgbModelData <- getLearnerModel(tunedXgbModel)
+tunedXgb = setHyperPars(xgb, par.vals = tunedXgbPars$x)
+tunedXgbModel = train(tunedXgb, fuelTask)
+xgbModelData = getLearnerModel(tunedXgbModel)
 ggplot(xgbModelData$evaluation_log, aes(iter, train_rmse)) +
 geom_line() +
 geom_point() +
@@ -1148,22 +1148,22 @@ We can see that 30 iterations/`trees` is just about enough for the RMSE to have 
 ### Benchmarking kNN, random forest, and XGBoost
 Using the parallelMap package won’t help because we’re training XGBoost models as part of the benchmark, and XGBoost works fastest if you allow it to perform its own internal parallelization.
 ```{r}
-kknnWrapper <- makeTuneWrapper(kknn, resampling = kFold,
+kknnWrapper = makeTuneWrapper(kknn, resampling = kFold,
 par.set = kknnParamSpace,
 control = gridSearch)
-forestWrapper <- makeTuneWrapper(forest, resampling = kFold,
+forestWrapper = makeTuneWrapper(forest, resampling = kFold,
 par.set = forestParamSpace,
 control = randSearch)
-xgbWrapper <- makeTuneWrapper(xgb, resampling = kFold,
+xgbWrapper = makeTuneWrapper(xgb, resampling = kFold,
 par.set = xgbParamSpace,
 control = randSearch)
 learners = list(kknnWrapper, forestWrapper, xgbWrapper)
-holdout <- makeResampleDesc("Holdout")
+holdout = makeResampleDesc("Holdout")
 
 library(parallel)
 library(parallelMap)
 parallelStartSocket(cpus = detectCores())
-bench <- benchmark(learners, fuelTask, holdout)
+bench = benchmark(learners, fuelTask, holdout)
 parallelStop()
 bench
 ```

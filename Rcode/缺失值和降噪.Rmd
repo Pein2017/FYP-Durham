@@ -1,0 +1,266 @@
+---
+title: "缺失值和降噪"
+author: "Peian"
+date: '2022-07-31'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2.in.offgas.." ) ] 
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+data19 = data19[,-c(53:59)]
+
+p = ncol(data19)
+names(data19)
+set.seed(825)
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )
+}
+#data19 = data19[,-1]
+### de noise   ----------------------------------------------------------
+p = ncol(data19)
+cols = count_dataframe( data19 , thres = 8) 
+cols = cols$columns
+temp = c(cols,p)
+columns = c()
+for ( i in 1:p)
+{
+  if  ( length( intersect(i , temp) ) !=0 )
+  {
+    next
+  }
+  columns= c(columns , i )
+}
+columns
+nn = names(data19)
+time = data19$EFT_H
+windows_size = 5
+for (j in columns)
+{
+  x = data19[,j]
+  std = sd(x)
+  difference = abs( diff(x) )
+  index_noise = which( difference > 2 *std )
+  for (i in (index_noise+1) ){
+    if ( i > windows_size  && i <= length(x) - windows_size - 1 )
+    {
+      estimate = mean_xt( x , i , windows_size)
+      x[i] = estimate
+      if (sum(is.na(x) > 0))
+        {
+          print("break")
+          break
+        }
+    }
+  }
+  data19[,j] = x
+}
+
+# ----------------------------------------------------------------
+train = data19[-index , ]
+test = data19[index,]
+```
+
+
+### final function
+```{r}
+filter = function( data , t , thres_table = 8 , width = 10 , ratio = 1)
+{
+  nn = names(data)
+  n = nrow(data)
+  nj = ncol(data)
+  outliers_index = c()
+  for ( j in 1:nj)
+  {
+    iter = 0
+    if ( length( table( data[,j] ) ) < thres_table )
+    {
+      next
+    }
+    else
+    {
+      while (TRUE)
+      {
+        iter = iter + 1
+        x = data[,j]
+        input = list( x = x , t = t , width = width)
+        res = rolling_windows( input , mean_xt)
+        outlier_thres = ratio* sd( x )
+        outlier_index = which( abs( x - res ) > outlier_thres )
+        if (iter == 1)
+        {
+          if ( length(outlier_index) == 0)
+          {
+              outlier_index = c(1)
+              cat("number of outliers is 0! \n")
+          }
+          outliers_index = cbind( outliers_index , outlier_index)
+          cat(nn[j],":  number of outliers is",length(outlier_index), "\n")
+        }
+        if ( length( outlier_index) ==0 )
+        {
+          break
+        }
+        data[outlier_index,j] = res[outlier_index]
+      }
+      
+    }
+  }
+  return ( list( data = data , outlier_index = outliers_index ) )
+}
+```
+
+
+
+<!-- # testing filter -->
+<!-- ```{r} -->
+<!-- nn = names(data19) -->
+<!-- data = data19[,columns] -->
+<!-- time = data19$EFT_H -->
+<!-- filter_data = filter( data = data19[,columns], t = data19$EFT_H, width = 10) -->
+<!-- counter = 0 -->
+<!-- for ( j in columns) -->
+<!-- { -->
+<!--   counter = counter + 1 -->
+<!--   x = data19[,j] -->
+<!--   index = filter_data$outlier_index[,counter] -->
+<!--   index = index[ which( !duplicated(index) ) ] -->
+<!--   plot( time , x, xlab = "EFT"  , ylab = nn[j] , main = paste("EFT vs", nn[j]) , col = "black" ) -->
+<!--   points( time[index] , filter_data$data[index,counter] , col = "red" ) -->
+<!--   #points( time[index] , x[index] , col = "blue" ,pch = 5 ) -->
+<!--   legend( x = "topright" , legend = c("true","de-noise"), col =c("black","red") ) -->
+<!-- } -->
+<!-- ``` -->
+
+```{r}
+mean_xt = function( data  , center , windows_size )
+{
+  data = c( data[  (center - windows_size) : (center-1)  ] , data[(center+2) : (center + windows_size+1)] )
+  radial = length( data ) / 2
+  weight = c(  1:radial , radial:1 )
+  weight = weight / sum(weight)
+  res = weighted.mean( data , w = weight )  
+  #res = mean(data)
+  return ( res )
+}
+est = mean_xt( x , 2163 , 5)
+```
+
+
+### decide the colums 
+```{r}
+p = ncol(data19)
+cols = count_dataframe( data19 , thres = 8) 
+cols = cols$columns
+temp = c(1,cols,p)
+columns = c()
+for ( i in 1:p)
+{
+  if  ( length( intersect(i , temp) ) !=0 )
+  {
+    next
+  }
+  columns= c(columns , i )
+}
+columns
+```
+
+```{r}
+nn = names(data19)
+time = data19$EFT_H
+windows_size = 5
+for (j in columns[1:5])
+{
+  x = data19[,j]
+  std = sd(x)
+  difference = abs( diff(x) )
+  index = which( difference > 2 *std )
+  for (i in (index+1) ){
+    if ( i > windows_size)
+    {
+    estimate = mean_xt( x , i , windows_size)
+    x[i] = estimate
+    cat( which(is.na(x)) )
+    }
+  }
+  #data19[,j] = x
+  plot( time , data19[,j] , xlab = "EFT"  , ylab = nn[j] , main = paste("EFT vs", nn[j]) , col = "black")
+  points( time[index+1] ,data19[index+1,j] , col = "blue")
+  points( time[index+1] , x[index+1] , col = "red")
+  legend( x = "topright" , legend = c("original","true","de-noise"), col =c("black","blue","red"), pch = 1 )
+}
+```
+
+
+
+
+
+<!-- # 计算滑动窗口内到数据点空间中心的平均 距离 -->
+<!-- ```{r} -->
+<!-- x = input$x[1:10] -->
+<!-- t = input$t[1:10] -->
+<!-- xt = mean_xt( x , t ) -->
+<!-- mean_xt = function( x,t ) -->
+<!-- { -->
+<!--   x_mean = mean(x) -->
+<!--   # t_mean = mean(t) -->
+<!--   res = mean(   x - x_mean    ) -->
+
+<!--   return ( res  ) -->
+<!-- } -->
+<!-- mean_zt = function( x,t ) -->
+<!-- { -->
+<!--   x_mean = mean(x) -->
+<!--   # t_mean = mean(t) -->
+<!--   distance =  x - x_mean -->
+<!--   res = mean( abs( diff(distance) ) ) -->
+<!--   return (res ) -->
+<!-- } -->
+<!-- m_t = function( x , t , width ) -->
+<!-- { -->
+<!--   res = mean_xt( x, t ) + width/2 * mean_zt( x, t ) -->
+<!--   return (res) -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- mean_xt = function( data  , center , windows_size ) -->
+<!-- { -->
+<!--   data = c( data[  (center - windows_size) : (center-1)  ] , data[(center+1) : (center + windows_size)] ) -->
+<!--   radial = length( data ) / 2 -->
+<!--   weight = c(  1:radial , radial:1 ) -->
+<!--   weight = weight / sum(weight) -->
+<!--   res = weighted.mean( data , w = weight )   -->
+<!--   #res = mean(data) -->
+<!--   return ( res ) -->
+<!-- } -->
+<!-- ``` -->
+
+<!-- ```{r} -->
+<!-- rolling_windows = function( input , fun) -->
+<!-- { -->
+<!--   x = input$x -->
+<!--   t = input$t -->
+<!--   width = input$width -->
+<!--   result = rep( NA , length(x) ) -->
+<!--   for ( i in (width+1) : ( length(x) - width)  ) -->
+<!--   { -->
+<!--     result[i] = fun( data = x , center = i , windows_size = width) -->
+<!--   } -->
+<!--   return (result) -->
+<!-- } -->
+<!-- ``` -->
+

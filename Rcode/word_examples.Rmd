@@ -1,0 +1,42 @@
+---
+title: "word"
+output: html_document
+date: '2022-06-25'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+x = seq( -2 , 5 , by = 0.5)
+xout = seq( -2 , 5 , by = 0.3)
+y = ( x - 2) **2 + rnorm(  length(x) , mean = 0 ,sd = 1)
+sm = predict( smooth.spline(x,y) , xout)$y 
+plot(x,y , col = 'black', type = 'l' , main = 'smoothing')
+lines( xout , sm , col = 'red' )
+points( xout , sm , col = 'red' )
+legend( 'topright' , c('original curve','smoothed curve') , lty=1,pch=1 , col = c('black','red'))
+
+
+sp = spline(x,y,xout= xout)
+plot(x,y , col ='black', type = 'l' , main = 'interpolation')
+points( xout , sp$y , col = 'blue')
+lines( xout , sp$y , col = 'blue')
+legend( 'topright' , c('original curve','interpolated curve') , lty=1,pch=1 , col = c('black','blue'))
+
+(sm-sp$y)
+
+plot(x,y,col='black')
+
+```
+
+
+```{r}
+plot(dist ~ speed, data = cars, main = "data(cars)  &  smoothing splines" , col='blue')
+points( cars$speed , predict(cars.spl , cars$speed)$y , col = 'red')
+cars.spl <- with(cars, smooth.spline(speed, dist))
+cars.spl
+
+```
+

@@ -1,0 +1,42 @@
+---
+title: "Prim"
+author: "Peian"
+date: '2022-06-29'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(prim)
+#library(dplyr)   #data wrangling
+library(ggplot2) #plotting 
+library(earth)   #fitting MARS models
+library(caret)   #tuning model parameters
+library( tidyverse)
+library(glmnet)
+library(PRIMsrc)
+```
+
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader(Hour = 600)
+data19 = temp$data_19
+ac19 = temp$ac_19
+```
+
+
+```{r}
+thr = c(0.25, -0.3)
+x = select( data19 , -interpolated_acetic)
+y = select(data19, c(interpolated_acetic) )
+prim = prim.box(x= x, y= y$interpolated_acetic)
+summary( prim )
+plot(prim, alpha=0.5)
+plot(prim, alpha=0.5, splom=FALSE, ticktype="detailed", colkey=FALSE)
+```
+

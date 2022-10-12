@@ -1,0 +1,534 @@
+---
+title: "AceticInCaret"
+author: "Peian"
+date: '2022-07-04'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Rgraphviz)
+library(rJava)
+library(AppliedPredictiveModeling)
+transparentTheme(trans = .4)
+library(caret)
+library(gbm)
+library(mboost)
+library(KRLS) # Polynomial Kernel Regularized Least Squares
+library(monomvn) # Bayesian Ridge Regression (Model Averaged)
+library(doParallel)
+library( e1071 )
+library( xgboost )
+library( kernlab )
+library( KRLS )
+library(randomForest)
+library(RWeka)
+library( partykit )
+library( mlbench)
+library(RWekajars)
+
+```
+
+```{r}
+removeParallel = function() {
+  env = foreach:::.foreachGlobals
+  rm(list=ls(name=env), pos=env)
+}
+```
+
+```{r}
+# Sys.setenv('JAVA_HOME'="D:/Java/jdk-18.0.1.1")
+```
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+```
+
+### Near zero variance method
+```{r}
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+# removing  "pump.outlet"
+data19 = data19[, -nzv]
+p = ncol(data19)
+```
+
+
+### Selecting the data closest to real data
+
+```{r , echo = FALSE}
+set.seed(1)
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )
+}
+trueData19 = data19[index,]
+
+train = data19[-index , ]
+test = data19[index,]
+```
+
+### Plots with some Xs
+```{r}
+cols = c(1:2)
+featurePlot(x = data19[, cols], 
+            y = data19[,p], 
+            plot = "scatter",
+            type = c("p", "smooth")
+          )
+```
+
+
+### Correlation
+```{r}
+trainCor = cor(train)
+highCorr = sum( abs(trainCor[upper.tri(trainCor)]) > 0.9 )
+highCorr
+```
+
+
+# Go
+## Pre-process
+```{r}
+set.seed(825)
+cpu = detectCores()
+tuneLength = 2
+repeats = 2
+folds = 5
+total = repeats * folds 
+result = c() ##  Record for performances
+lambdaSearch = seq( 0, 5 , length.out = 100) 
+lambdaSearch[2] = 1e-5   ## set a small number to check whether lasso works #
+alphaSearch = seq(0,1,20)
+# Set the seeds
+seeds = vector(mode = "list", length = total+1)
+for(i in 1:total) seeds[[i]]= sample.int(n=1000, 15 )
+seeds[[ (total+1) ]]=sample.int(1000, 1)
+# Set fitControl for the trControl
+fitControl = trainControl( method = "repeatedcv", number = folds, repeats = repeats , search = "random" ,seed = seeds)
+```
+### Pre-process
+```{r}
+p = ncol( train )
+subsets = c( 10: (p-1) )
+preProcess = c("center","scale")
+normalization = preProcess(train[,-p] , method = preProcess)
+
+preTest = cbind( predict( normalization , test[,-p]) , interpolated_acetic = test[,p] )
+preTrain = cbind(predict(normalization, train[,-p]), interpolated_acetic = train[,p])
+```
+
+
+## LM with stepwise selection
+```{r}
+set.seed(825)
+lm = modelTrain( train, 
+                 method = "lm" , 
+                 trControl = fitControl,
+                 tuneLength = tuneLength, 
+                 cpu = cpu)
+lm
+```
+### Substract and Prediction
+```{r}
+whichBest = best(lm$results, "RMSE" , maximize = FALSE) 
+lm$results[whichBest,]
+Predict = predict( lm, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result , lm = RMSE)
+```
+
+## MARS
+```{r}
+set.seed(825)
+marsGrid = expand.grid( degree = 1:4,  nprune = floor( seq(8, (p-1), by = 1 ) ) )
+mars = modelTrain(data = train, 
+                  method = "earth", 
+                  trControl = fitControl,
+                  tuneGrid = marsGrid,
+                  tuneLength = tuneLength,
+                  cpu = cpu
+                  )
+mars
+```
+### Substract and Prediction
+```{r}
+whichBest = best(mars$results, "RMSE" , maximize = FALSE) 
+mars$results[whichBest,]
+Predict = predict( mars, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result, mars = RMSE)
+
+```
+## Bag MARS with GCV
+```{r}
+set.seed(825)
+bagMars = modelTrain( data = train, 
+                      method = "bagEarth", 
+                      trControl = fitControl,
+                      tuneGrid = NULL,
+                      tuneLength = tuneLength, 
+                      cpu = cpu)
+
+bagMars
+```
+### Substract and Prediction
+```{r}
+whichBest = best(bagMars$results, "RMSE" , maximize = FALSE) 
+bagMars$results[whichBest,]
+Predict = predict( bagMars, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result, bagMars = RMSE)
+result
+```
+
+## adaBag CART
+```{r}
+set.seed(825)
+adaBag = modelTrain(data = train, 
+                    method = "treebag", 
+                    trControl = fitControl,
+                    tuneGrid = NULL,
+                    tuneLength = tuneLength,
+                    cpu = cpu
+                )
+adaBag
+```
+### Substract and Prediction
+```{r}
+whichBest = best(adaBag$results, "RMSE" , maximize = FALSE) 
+adaBag$results[whichBest,]
+Predict = predict( adaBag, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  adaBag = RMSE)
+```
+
+
+## Rpart---CART
+```{r}
+set.seed(825)
+cart = modelTrain(data = train, 
+                  method = "rpart", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength, 
+                  cpu = cpu
+                )
+cart
+```
+### Substract and Prediction
+```{r}
+whichBest = best(cart$results, "RMSE" , maximize = FALSE) 
+cart$results[whichBest,]
+Predict = predict( cart, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  cart = RMSE)
+```
+
+
+## xgboost
+```{r}
+set.seed(825)
+xgb = modelTrain( data = train, 
+                  method = "xgbDART", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu
+                )
+xgb
+
+```
+### Substract and Prediction
+```{r}
+whichBest = best(xgb$results, "RMSE" , maximize = FALSE) 
+xgb$results[whichBest,]
+Predict = predict( xgb, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  xgb = RMSE)
+```
+
+
+## GP with Radial basis kernel
+```{r}
+set.seed(825)
+GpKernel = modelTrain(data = train, 
+                      method = "gaussprRadial", 
+                      trControl = fitControl,
+                      tuneGrid = NULL,
+                      tuneLength = tuneLength,
+                      cpu = cpu
+                )
+GpKernel
+```
+### Substract and Prediction
+```{r}
+whichBest = best(GpKernel$results, "RMSE" , maximize = FALSE) 
+GpKernel$results[whichBest,]
+Predict = predict( GpKernel, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  GpKernel = RMSE)
+```
+
+## KNN
+```{r}
+set.seed(825)
+knn = modelTrain( data = train, 
+                  method = "kknn", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu
+                )
+knn
+```
+### Substract and Prediction
+```{r}
+whichBest = best(knn$results, "RMSE" , maximize = FALSE) 
+knn$results[whichBest,]
+Predict = predict( knn, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  knn = RMSE)
+```
+
+## Partial LS
+```{r}
+set.seed(825)
+pls = modelTrain( data = train, 
+                  method = "pls", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu
+                )
+pls
+```
+### Substract and Prediction
+```{r}
+whichBest = best(pls$results, "RMSE" , maximize = FALSE) 
+pls$results[whichBest,]
+Predict = predict( pls, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  pls = RMSE)
+```
+
+## Polynomial kernel regularized  LS
+```{r}
+set.seed(825)
+PolyKernelRLs = modelTrain( data = train, 
+                            method = "krlsPoly", 
+                            trControl = fitControl,
+                            tuneGrid = NULL,
+                            tuneLength = tuneLength,
+                            cpu = cpu
+                )
+PolyKernelRLs
+```
+### Substract and Prediction
+```{r}
+whichBest = best(PolyKernelRLs$results, "RMSE" , maximize = FALSE) 
+PolyKernelRLs$results[whichBest,]
+Predict = predict( PolyKernelRLs, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  PolyKernelRLs = RMSE)
+```
+
+## PCR 
+```{r}
+set.seed(825)
+pcr = modelTrain( data = train, 
+                  method = "pcr", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu
+                )
+pcr
+```
+### Substract and Prediction
+```{r}
+whichBest = best(pcr$results, "RMSE" , maximize = FALSE) 
+pcr$results[whichBest,]
+Predict = predict( pcr, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  pcr = RMSE)
+```
+
+## Random Forest 
+```{r}
+set.seed(825)
+rf = modelTrain(  data = train, 
+                  method = "rf", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu
+                )
+rf
+```
+### Substract and Prediction
+```{r}
+whichBest = best(rf$results, "RMSE" , maximize = FALSE) 
+rf$results[whichBest,]
+Predict = predict( rf, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  rf = RMSE)
+```
+
+
+
+## SVM with Radial basis kernel
+```{r}
+set.seed(825)
+svmRadial = modelTrain( data = train, 
+                        method = "svmRadial", 
+                        trControl = fitControl,
+                        tuneGrid = NULL,
+                        tuneLength = tuneLength,
+                        cpu = cpu
+                )
+svmRadial
+```
+### Substract and Prediction
+```{r}
+whichBest = best(svmRadial$results, "RMSE" , maximize = FALSE) 
+svmRadial$results[whichBest,]
+Predict = predict( svmRadial, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  svmRadial = RMSE)
+```
+## Lasso
+```{r}
+set.seed(825)
+lassoGrid = expand.grid( lambda = lambdaSearch , alpha = 0)
+lasso = modelTrain( data = train, 
+                    method = "glmnet", 
+                    trControl = fitControl,
+                    tuneGrid = lassoGrid,
+                    tuneLength = tuneLength,
+                    cpu = cpu
+                )
+lasso
+```
+### Substract and Prediction
+```{r}
+whichBest = best(lasso$results, "RMSE" , maximize = FALSE) 
+lasso$results[whichBest,]
+Predict = predict( lasso, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  lasso = RMSE)
+```
+
+
+
+## Bayesian Lasso
+```{r}
+set.seed(825)
+blassoGrid = expand.grid( lambda = lambdaSearch )
+blasso = modelTrain(  data = train, 
+                      method = "blasso", 
+                      trControl = fitControl,
+                      tuneGrid = NULL,
+                      tuneLength = tuneLength,
+                      cpu = cpu
+                )
+blasso
+```
+### Substract and Prediction
+```{r}
+whichBest = best(blasso$results, "RMSE" , maximize = FALSE) 
+blasso$results[whichBest,]
+Predict = predict( blasso, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  blasso = RMSE)
+```
+
+## Ridge 
+```{r}
+set.seed(825)
+RidgeGrid = expand.grid( lambda = lambdaSearch , alpha = 1 )
+Ridge = modelTrain( interpolated_acetic~ ., data = train, 
+                    method = "glmnet", 
+                    trControl = fitControl,
+                    tuneGrid = RidgeGrid,
+                    tuneLength = tuneLength,
+                    cpu = cpu
+                   )
+Ridge
+```
+### Substract and Prediction
+```{r}
+whichBest = best(Ridge$results, "RMSE" , maximize = FALSE) 
+Ridge$results[whichBest,]
+Predict = predict( Ridge, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  Ridge = RMSE)
+```
+
+
+## Elastic net
+```{r}
+set.seed(825)
+elasticGrid = expand.grid( lambda = lambdaSearch , alpha = alphaSearch )
+elasticNet = modelTrain(  data = train, 
+                          method = "glmnet", 
+                          trControl = fitControl,
+                          tuneGrid = elasticGrid,
+                          tuneLength = tuneLength,
+                          cpu = cpu
+                )
+elasticNet
+```
+### Substract and Prediction
+```{r}
+whichBest = best(elasticNet$results, "RMSE" , maximize = FALSE) 
+elasticNet$results[whichBest,]
+Predict = predict( elasticNet, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result,  elasticNet = RMSE)
+result
+```
+### Comparison among models in training set
+```{r}
+resamps = resamples(list( lm = lm , mars = mars, bagMars = bagMars,
+                         adaBag = adaBag, cart = cart , xgb = xgb,
+                         GpKernel = GpKernel ,
+                         knn = knn , pls = pls ,
+                         PolyKernelRLs = PolyKernelRLs, pcr = pcr,
+                         rf = rf, svmRadial = svmRadial, 
+                         lasso = lasso, blasso = blasso, Ridge = Ridge,
+                         elasticNet = elasticNet) )
+resamps
+```
+
+### Plots
+```{r}
+bwplot(resamps, layout = c(length(resamps$models), 1))
+```
+
+

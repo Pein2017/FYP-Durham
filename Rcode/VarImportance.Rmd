@@ -1,0 +1,330 @@
+---
+title: "VarImportance"
+author: "Peian"
+date: '2022-07-14'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+```
+### Near zero variance method
+```{r}
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2.in.offgas.." ) ]
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+index = c(53,65,30,28,21,3,32,25,18,46,27,16,49,48,15,51,19,5,31,11,38,43,6,68,44,33,4,2,52,17,13,10,9,14,66,12,63,7,8,45,40,50,39,37,64,42,47,41)
+data19 = data19[, c(1,index, ncol(data19) )]
+p = ncol(data19)
+```
+### Selecting the data closest to real data
+```{r , echo = FALSE}
+set.seed(825)
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )
+}
+trueData19 = data19[index,]
+train = data19[-index , ]
+test = data19[index,]
+```
+# Go
+## Pre-process
+```{r}
+set.seed(825)
+cpu = detectCores()
+tuneLength = 2
+repeats = 2
+folds = 3
+total = repeats * folds 
+result = c() ##  Record for performances
+lambdaSearch = seq( 0, 1 , length.out = 30) 
+lambdaSearch[2] = 1e-5   ## set a small number to check whether lasso works #
+alphaSearch = seq(0,1,10)
+# Set the seeds
+seeds = vector(mode = "list", length = total+1)
+for(i in 1:total) seeds[[i]]= sample.int(n=1000, (total + 1)  )
+seeds[[ (total+1) ]]=sample.int(1000, 1)
+
+# Set fitControl for the trControl
+fitControl = trainControl( method = "repeatedcv", number = folds, repeats = repeats , search = "random" ,seed = seeds)
+```
+### Pre-process
+```{r}
+p = ncol( train )
+subsets = c( 30: (p-1) )
+preProcess = c("center","scale")
+normalization = preProcess(train[,-p] , method = preProcess)
+
+preTrain = cbind(predict(normalization, train[,-p]), interpolated_acetic = train[,p])
+preTest = cbind( predict( normalization , test[,-p]) , interpolated_acetic = test[,p] )
+```
+
+### Search grid
+```{r}
+marsGrid = expand.grid( degree = 2:3,  nprune = floor( seq(30, (p-1), by = 1 ) ) )
+lassoGrid = expand.grid( lambda = lambdaSearch , alpha = 0)
+blassoGrid = expand.grid( lambda = lambdaSearch )
+RidgeGrid = expand.grid( lambda = lambdaSearch , alpha = 1 )
+elasticGrid = expand.grid( lambda = lambdaSearch , alpha = alphaSearch )
+m5Grid = expand.grid(pruned = c("Yes"), smoothed = c("No"), rules = c("Yes") ) 
+```
+
+### Train models
+```{r}
+m5 = modelTrain( train, "M5" , trControl = fitControl , tuneGrid = m5Grid , cpu = 16, test = test )
+
+lm = modelTrain( train, 
+                 method = "lm" , 
+                 trControl = fitControl,
+                 tuneLength = tuneLength, 
+                 cpu = cpu , 
+                 test = test)
+
+mars = modelTrain(data = train, 
+                  method = "earth", 
+                  trControl = fitControl,
+                  tuneGrid = marsGrid,
+                  tuneLength = tuneLength,
+                  cpu = cpu,
+                  test = test
+                  )
+bagMars = modelTrain( data = train, 
+                      method = "bagEarth", 
+                      trControl = fitControl,
+                      tuneGrid = NULL,
+                      tuneLength = tuneLength, 
+                      cpu = cpu,
+                      test = test)
+adaBag = modelTrain(data = train, 
+                    method = "treebag", 
+                    trControl = fitControl,
+                    tuneGrid = NULL,
+                    tuneLength = tuneLength,
+                    cpu = cpu,
+                    test = test
+                )
+
+cart = modelTrain(data = train, 
+                  method = "rpart", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength, 
+                  cpu = cpu, 
+                  test = test
+                )
+
+xgb = modelTrain( data = train, 
+                  method = "xgbDART", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu, 
+                  test = test
+                )
+
+GpKernel = modelTrain(data = train, 
+                      method = "gaussprRadial", 
+                      trControl = fitControl,
+                      tuneGrid = NULL,
+                      tuneLength = tuneLength,
+                      cpu = cpu,
+                      test = test
+                )
+knn = modelTrain( data = train, 
+                  method = "kknn", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu,
+                  test = test
+                )
+pls = modelTrain( data = train, 
+                  method = "pls", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu, 
+                  test = test
+                )
+PolyKernelRLs = modelTrain( data = train, 
+                            method = "krlsPoly", 
+                            trControl = fitControl,
+                            tuneGrid = NULL,
+                            tuneLength = tuneLength,
+                            cpu = cpu, 
+                            test = test
+                )
+pcr = modelTrain( data = train, 
+                  method = "pcr", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu, 
+                  test = test
+                )
+rf = modelTrain(  data = train, 
+                  method = "rf", 
+                  trControl = fitControl,
+                  tuneGrid = NULL,
+                  tuneLength = tuneLength,
+                  cpu = cpu, 
+                  test = test
+                )
+svmRadial = modelTrain( data = train, 
+                        method = "svmRadial", 
+                        trControl = fitControl,
+                        tuneGrid = NULL,
+                        tuneLength = tuneLength,
+                        cpu = cpu,
+                        test = test
+                )
+
+
+lasso = modelTrain( data = train, 
+                    method = "glmnet", 
+                    trControl = fitControl,
+                    tuneGrid = lassoGrid,
+                    tuneLength = tuneLength,
+                    cpu = cpu, 
+                    test = test
+                )
+
+
+blasso = modelTrain(  data = train, 
+                      method = "blasso", 
+                      trControl = fitControl,
+                      tuneGrid = NULL,
+                      tuneLength = tuneLength,
+                      cpu = cpu,
+                      test = test
+                )
+
+Ridge = modelTrain( interpolated_acetic~ ., data = train,
+                    method = "glmnet",
+                    trControl = fitControl,
+                    tuneGrid = RidgeGrid,
+                    tuneLength = tuneLength,
+                    cpu = cpu,
+                    test = test
+                   )
+elasticNet = modelTrain(  data = train, 
+                          method = "glmnet", 
+                          trControl = fitControl,
+                          tuneGrid = elasticGrid,
+                          tuneLength = tuneLength,
+                          cpu = cpu, 
+                          test = test
+                )
+```
+
+### Pre-process for recording variables importance
+```{r}
+vimp = data.frame( row.names = names(data19)[-p])
+models_weights = c()
+```
+# Importance
+```{r}
+nm = names(train)[1:(ncol(train)-1)]
+#lm
+lmImportance = getVarImp( lm , nm)
+vimp = cbind( vimp , lmImportance)
+models_weights = c( models_weights , lm$RMSE )
+#mars
+marsImportance = getVarImp( mars,nm)
+vimp = cbind( vimp , marsImportance)
+models_weights = c( models_weights , mars$RMSE )
+# adaBag
+adaBagImportance = getVarImp( adaBag ,nm)
+vimp = cbind( vimp , adaBagImportance)
+models_weights = c( models_weights , adaBag$RMSE )
+# cart 
+cartImportance = getVarImp( cart,nm)
+vimp = cbind( vimp , cartImportance)
+models_weights = c( models_weights , cart$RMSE )
+# xgb
+xgbImportance = getVarImp( xgb,nm)
+vimp = cbind( vimp , xgbImportance)
+models_weights = c( models_weights , xgb$RMSE )
+# GpKernel
+GpKernelImportance = getVarImp( GpKernel,nm)
+vimp = cbind( vimp , GpKernelImportance)
+models_weights = c( models_weights , GpKernel$RMSE )
+# knn
+knnImportance = getVarImp( knn,nm)
+vimp = cbind( vimp , knnImportance)
+models_weights = c( models_weights , knn$RMSE )
+# pls
+plsImportance = getVarImp( pls,nm)
+vimp = cbind( vimp , plsImportance)
+models_weights = c( models_weights , pls$RMSE )
+# PolykernelRls
+PolyKernelRLsImportance = getVarImp( PolyKernelRLs,nm)
+vimp = cbind( vimp , PolyKernelRLsImportance)
+models_weights = c( models_weights , PolyKernelRLs$RMSE )
+# pcr
+pcrImportance = getVarImp( pcr,nm)
+vimp = cbind( vimp , pcrImportance)
+models_weights = c( models_weights , pcr$RMSE )
+# rf
+rfImportance = getVarImp( rf,nm)
+vimp = cbind( vimp , rfImportance)
+models_weights = c( models_weights , rf$RMSE )
+# svmRadial
+svmRadialImportance = getVarImp( svmRadial,nm)
+vimp = cbind( vimp , svmRadialImportance)
+models_weights = c( models_weights , svmRadial$RMSE )
+# lasso
+lassoImportance = getVarImp( lasso,nm)
+vimp = cbind( vimp , lassoImportance)
+models_weights = c( models_weights , lasso$RMSE )
+# blasso
+blassoImportance = getVarImp( blasso,nm)
+vimp = cbind( vimp , blassoImportance)
+models_weights = c( models_weights , blasso$RMSE )
+# # Ridge
+# RidgeImportance = varImp( Ridge$model )$importance$Overall
+# vimp = cbind( vimp , RidgeImportance)
+# Elastic net
+elasticNetImportance = getVarImp( elasticNet,nm)
+vimp = cbind( vimp , elasticNetImportance)
+models_weights = c( models_weights , elasticNet$RMSE )
+```
+
+```{r}
+temp =  sum( models_weights ) / models_weights 
+final_weights = as.matrix( temp / sum(temp) )
+
+final_vimp =  ( as.matrix(vimp) %*% final_weights )
+final_vimp = final_vimp[ order(final_vimp , decreasing = TRUE) , ]
+write.csv(final_vimp, file ="final_importance", row.names =TRUE )
+```
+
+```{r}
+models = list( lm = lm$model , mars = mars$model,
+                          adaBag = adaBag$model, cart = cart$model , xgb = xgb$model,
+                          GpKernel = GpKernel$model ,
+                          knn = knn$model , pls = pls$model ,
+                          PolyKernelRLs = PolyKernelRLs$model, pcr = pcr$model,
+                          rf = rf$model , svmRadial = svmRadial$model,
+                          lasso = lasso$model, blasso = blasso$model,
+                          elasticNet = elasticNet$model)
+                          
+resamps = resamples( models)
+bwplot(resamps)
+rownames( final_weights )= resamps$models
+cat('The ranking on the test data set is:')
+final_weights[ order( final_weights , decreasing = TRUE),]
+```
+

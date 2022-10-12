@@ -1,0 +1,164 @@
+---
+title: "MARS"
+output: html_document
+date: '2022-06-25'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)   #data wrangling
+library(ggplot2) #plotting 
+library(earth)   #fitting MARS models
+library(caret)   #tuning model parameters
+library( tidyverse)
+library(glmnet)
+```
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader()
+data19 = temp$data_19
+
+ac19 = temp$ac_19
+```
+
+```{r}
+hyper_grid = expand.grid(
+  degree = 1:3, 
+  nprune = seq(2, 50, length.out = 20) %>% floor()
+)
+
+#make this example reproducible
+set.seed(1)
+```
+
+```{r}
+cv_mars = train(
+  x = subset(data19, select = -c(interpolated_acetic)),
+  y = data19$interpolated_acetic,
+  method = "earth",
+  metric = "RMSE",
+  trControl = trainControl(method = "cv", number = 10),
+  tuneGrid = hyper_grid
+)
+
+```
+
+```{r}
+cv_mars$results %>%
+  filter(nprune == cv_mars$bestTune$nprune, degree == cv_mars$bestTune$degree)
+
+#display test RMSE by terms and degree
+ggplot(cv_mars)
+cv_mars$results
+```
+```{r}
+#mars3 = earth( interpolated_acetic ~., data = data19 , degree = 3 , nfold = 10 )
+mars2 = earth( interpolated_acetic ~., data = data19 , degree = 2 , nfold = 10 )
+```
+
+```{r}
+plotmo(mars2)
+summ = summary(mars2, style =  'h' , digits = 2 , decomp = 'anova')
+summ 
+
+```
+
+
+```{r}
+offline19 = read.csv(file.choose(), header=T)
+summary( offline19 )
+OD = select( offline19  , c("EFT.h", "Final.OD") )
+OD = OD[complete.cases(OD), ]
+OD = subset( OD , OD$EFT.h < 360)
+```
+
+```{r}
+x = OD$EFT.h
+y = OD$Final.OD
+xout = data19$EFT_H
+fittedOD = spline(x,y,xout= xout)
+plot( data19$EFT_H , ( fittedOD$y - data19$optical.density) ,main = 'difference between online and offline', xlab = 'EFT' , ylab = 'offline - online' )
+#cbind( data19$EFT_H  ,data19$optical.density )
+```
+
+```{r}
+x = OD$EFT.h
+y = OD$Final.OD
+xout = data19$EFT_H
+fitted_OD = spline( x , y , xout = xout )$y
+data19$optical.density = fitted_OD
+```
+
+
+### Selecting the data closest to real data
+
+```{r , echo = FALSE}
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which(   abs( ac19$EFT[i] - data19$EFT_H)   == min( abs( ac19$EFT[i] - data19$EFT_H) )  )
+}
+#cbind( data19$EFT_H[index] , ac19$EFT)
+```
+
+```{r}
+data_new_19 = data19[index, ]
+```
+### Lasso with cloest data
+```{r}
+p = ncol(data_new_19)   ### 
+col = ncol(data_new_19)
+x = as.matrix( data_new_19[,-p])
+
+xDesign = cbind(1, x)
+n = nrow(data_new_19)
+y = data_new_19$interpolated_acetic
+#parallelStartSocket(cpus = detectCores())
+cvfit = cv.glmnet(xDesign, y  , nfolds =  5  )
+plot(cvfit)
+cvfit$lambda.min # 交叉验证平均误差最小时模型的lambda
+cvfit$lambda.1se
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+one_se_coef = as.matrix( coef(cvfit)[-2] ) # 默认s = "lambda.1se"
+zero_coef = as.matrix( coef(cvfit, s = 0 )[-2]  )
+
+pred_min =   xDesign  %*% min_coef
+pred_one_se = xDesign  %*% one_se_coef
+pred_zero = xDesign %*% zero_coef
+cat(  "mse of pred_min: ", sum( abs(pred_min - y )) /n  ,
+     "mse of pred_one_se: ",sum( abs(pred_one_se - y )) /n , 
+     "mse of pred_zero: ",sum( abs( pred_zero - y ))  / n   )
+```
+
+
+
+### Refit  LR
+```{r , echo = FALSE}
+
+lasso_coef = as.matrix(  coef.glmnet(cvfit , s = cvfit$lambda.min)    )[-2]
+index = which( lasso_coef[-1] != 0 )
+after_lasso_full_19 = data19[, c(index,p) ]
+after_lasso_sub_19 = data_new_19[, c(index,p)]
+# counting = count_dataframe( after_lasso_full_19 , thres = 6)
+# factor_cols = counting$columns
+# factor_counts = counting$count
+# for ( j  in factor_cols )
+# {
+#   after_lasso_full_19[,j] = as.factor( after_lasso_full_19[ , j ])
+# }
+# 
+# lasso_var = paste( "interpolated_acetic","~" , paste( names(data_new_19)[index] , collapse = "+") )
+reg = lm( interpolated_acetic~.  , data = after_lasso_full_19)
+step_reg = step( reg )
+summary(step_reg)
+
+
+reg =  lm( interpolated_acetic~.  , data = after_lasso_sub_19)
+step_reg_sub = step( reg )
+summary(step_reg_sub)
+```

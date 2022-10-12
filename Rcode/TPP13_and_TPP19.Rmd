@@ -1,0 +1,431 @@
+---
+title: "TPP13_and_TPP19"
+author: "Peian Lu"
+date: '2022-06-07'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#library(tibble)
+#library(dplyr)
+library(ggplot2)
+#library(tidyr)
+library(purrr)
+library(parallel)
+library(parallelMap)
+library(mlr)
+library(tidyverse)
+
+library(car)
+library(forecast)
+require(gam)
+require(monomvn)
+require(LearnBayes)
+require(glmnet)
+require(nortest)
+require(caret)
+```
+
+## Pre-process function
+
+```{r}
+remove_columns = function( data_train , data_test = NULL)
+{
+remove_col = c()
+for (j in 1:(ncol(data_train)-2) ) 
+{
+  if (  mean(data_train[,j]) < 0.01 | min(data_train[,j])  == mean(data_train[,j])  )
+  remove_col = c(remove_col , j)
+  
+}
+return ( remove_col )
+}
+
+correct = function( data_train )
+{
+  data_train =  data_train[complete.cases(data_train) ,]
+  for ( j in 1:ncol( data_train ) )
+  {
+    index = which( data_train[,j] < 0.3)
+    data_train[index,j] = 0
+  }
+  return (data_train)
+}
+```
+
+
+### data19
+
+```{r}
+data19 = read.csv("C:/Users/85212/Desktop/Pro-data/TPP19_online.csv", header=TRUE)
+ac19 = read.csv( "C:/Users/85212/Desktop/Pro-data/TPP19_ac.csv" ,header=TRUE) 
+data19= data19[,-2]
+
+data13 = read.csv("C:/Users/85212/Desktop/Pro-data/TPP13_online.csv", header=TRUE)
+ac13 = read.csv( "C:/Users/85212/Desktop/Pro-data/TPP13_ac.csv" ,header=TRUE) 
+
+combine_name = cbind( names(data13) , names(data19) )
+
+ac19 = dplyr:: filter( ac19 , EFT < 360)
+data19 = dplyr:: filter( data19 , EFT_H < 360)
+
+ac13 = dplyr:: filter( ac13 , EFT_H < 360)
+data13 = dplyr:: filter( data13 , EFT_H < 360)
+
+```
+
+## Merging by Cubic Spline Interpolation
+
+```{r}
+x = ac19$EFT
+y = ac19$acetic
+x_out = data19$EFT_H
+interpolated__acetic = spline(x = x ,y = y , xout = x_out )
+#interpolated__formic = spline( x = x , y = ac19$formic , xout = x_out)
+data_19 = cbind(data19 , interpolated_acetic = interpolated__acetic$y ) 
+
+x = ac13$EFT_H
+y = ac13$acetic
+x_out = data13$EFT_H
+interpolated__acetic = spline(x = x ,y = y , xout = x_out )
+data_13 = cbind(data13 , interpolated_acetic = interpolated__acetic$y ) 
+
+
+index = c( which( names(data_13) == 'headspace.pressure') , which(names(data_13) == 'pressure.at.position.4') )
+data_19 = data_19[,-index]  ## remove constant headspac19e.pressure
+data_13 = data_13[ , - index ]
+# rbind( names(data_13) , names(data_19) )
+
+```
+
+##Pre-process
+
+```{r}
+data_19 = correct(data_19)
+data_13 = correct(data_13)
+remove_index = remove_columns( data_19 )
+data_19 = data_19[, - remove_index ]
+data_13 = data_13[, - remove_index ]
+summary(data_19)
+summary(data_13)
+```
+
+### Selecting the data closest to real data
+
+```{r}
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which(   abs( ac19$EFT[i] - data_19$EFT_H)   == min( abs( ac19$EFT[i] - data_19$EFT_H) )  )
+}
+cbind( data_19$EFT_H[index] , ac19$EFT)
+```
+
+### New Training with cloest data
+```{r}
+
+data_new_19 = data_19[index, ]
+reg19 = lm( interpolated_acetic ~., data = data_new_19 )
+x = data_new_19$EFT_H
+y = reg19$fitted.values
+x_out = ac19$EFT
+fitted__acetic = spline(x = x ,y = y , xout = x_out )
+plot( ac19$EFT , ac19$acetic , col = 'blue' , main = 'TPP19' , xlab = 'EFT' , ylab = 'acetic')
+points( ac19$EFT , fitted__acetic$y , col = 'red')
+legend('topleft',legend=c('true' , 'predicted') , fill= c('blue','red') )
+plot( ac19$acetic , fitted__acetic$y )
+summary(reg19)
+```
+
+### Lasso 
+```{r}
+p = ncol(data_new_19)   ### 
+col = ncol(data_new_19)
+x = as.matrix( data_new_19[,-p])
+xDesign = cbind(1, x)
+n = nrow(data_new_19)
+y = data_new_19$interpolated_acetic
+
+
+vif_number = c()
+rsq = c()
+search = seq( 1e-4, 0.5  ,  1*1e-3  )
+
+cvfit = cv.glmnet(xDesign, y   )
+cvfit$lambda.min # 交叉验证平均误差最小时模型的lambda
+cvfit$lambda.1se 
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+one_se_coef = as.matrix( coef(cvfit)[-2] ) # 默认s = "lambda.1se"
+zero_coef = as.matrix( coef(cvfit, s = 0 )[-2]  )
+
+pred_min =   xDesign  %*% min_coef
+pred_one_se = xDesign  %*% one_se_coef
+pred_zero = xDesign %*% zero_coef
+cat( 'prediction of min: ', sum( abs(pred_min - y )) /n  , 'of one_se: ', sum( abs( pred_one_se - y ))  / n , ' of zero: ',  sum( abs( pred_zero - y ))  / n    )
+
+
+
+index = which( one_se_coef[-1] != 0 )
+# names(data_13)[index]
+lasso_var = paste( "interpolated_acetic","~" , paste( names(data_new_19)[index] , collapse = "+") )
+reg_new = lm( lasso_var , data = data_new_19)
+summary(reg_new)
+step_reg_new = step( reg_new )
+summary( step_reg_new )
+
+
+## scale 
+scale_data_19 = scale( data_new_19[,-66] )
+scale_meanstd = attributes( scale_data_19 )
+scale_data_19 = as.data.frame( scale_data_19)
+scale_data_19 = cbind( scale_data_19 , interpolated_acetic = data_new_19[,66])
+
+p = ncol(data_new_19)   ### 
+col = ncol(data_new_19)
+x = as.matrix( scale_data_19[,-p])
+xDesign = cbind(1, x)
+n = nrow(scale_data_19)
+y = scale_data_19$interpolated_acetic
+cvfit = cv.glmnet(xDesign, y   )
+cvfit$lambda.min # 交叉验证平均误差最小时模型的lambda
+cvfit$lambda.1se 
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+one_se_coef = as.matrix( coef(cvfit)[-2] ) # 默认s = "lambda.1se"
+zero_coef = as.matrix( coef(cvfit, s = 0 )[-2]  )
+cat( 'prediction of min: ', sum( abs(pred_min - y )) /n  , 'of one_se: ', sum( abs( pred_one_se - y ))  / n , ' of zero: ',  sum( abs( pred_zero - y ))  / n    )
+
+index = which( one_se_coef[-1] != 0 )
+# names(data_13)[index]
+lasso_var = paste( "interpolated_acetic","~" , paste( names(data_new_19)[index] , collapse = "+") )
+reg_new = lm( lasso_var , data = scale_data_19)
+
+step_reg_new = step( reg_new )
+#summary(reg_new)
+summary( step_reg_new )
+
+```
+
+
+### Plots with active variables
+```{r}
+
+data1_gather = gather(data_19[,c( index ,66)], key = "Variable",
+value = "Value", -c( interpolated_acetic ) )
+ggplot(data1_gather, aes(Value, interpolated_acetic)) +
+facet_wrap(~ Variable, scale = "free_x") +
+geom_point() +
+geom_smooth(method = "lm", col = "blue") +
+theme_bw()
+
+```
+### Plot with interested variables 
+```{r}
+par( mfrow = c(2,1 ))
+plot( data_19$partial.pressure..DP. , data_19$interpolated_acetic , main = 'partial.pressure..DP' , xlab = ' partial.pressure..DP ' , ylab = 'acid' ) 
+plot( data_19$EFT_H , data_19$partial.pressure..DP. , xlab = 'EFT ' , ylab = ' partial.pressure..DP ')
+
+par( mfrow = c(2,1 ))
+plot( data_19$O2.in.offgas.. , data_19$interpolated_acetic , main = 'O2.in.offgas' , xlab = ' O2.in.offgas ' , ylab = 'acid' ) 
+plot( data_19$EFT_H , data_19$O2.in.offgas.. , xlab = 'EFT ' , ylab = ' O2.in.offgas ')
+
+par( mfrow = c(2,1 ))
+plot( data_19$pH.at.stn1 , data_19$interpolated_acetic , main = 'pH.at.stn1' , xlab = ' pH.at.stn1 ' , ylab = 'acid' ) 
+plot( data_19$EFT_H , data_19$pH.at.stn1 , xlab = 'EFT ' , ylab = ' pH.at.stn1 ')
+
+
+par( mfrow = c(2,1 ))
+plot( data_19$optical.density , data_19$interpolated_acetic , main = 'optical.density' , xlab = ' optical.density ' , ylab = 'acid' ) 
+plot( data_19$EFT_H , data_19$optical.density , xlab = 'EFT ' , ylab = ' optical.density ')
+abline( h = 1 , col = 'red ')
+abline( h = 1.3 , col = 'red ')
+
+
+par( mfrow = c(2,1 ))
+plot( data_19$dissolved.oxygen.at.stn5 , data_19$interpolated_acetic , main = 'dissolved.oxygen.at.stn5' , xlab = ' dissolved.oxygen.at.stn5 ' , ylab = 'acid' ) 
+plot( data_19$EFT_H , data_19$dissolved.oxygen.at.stn5 , xlab = 'EFT ' , ylab = ' dissolved.oxygen.at.stn5 ')
+
+
+par( mfrow = c(2,1 ))
+plot( data_19$Tempered.Water.Temperature.before.Temped.water.cooler , data_19$interpolated_acetic , main = 'Tempered.Water.Temperature.before.Temped.water.cooler' , xlab = ' Tempered.Water.Temperature.before.Temped.water.cooler ' , ylab = 'acid' ) 
+plot( data_19$EFT_H , data_19$Tempered.Water.Temperature.before.Temped.water.cooler , xlab = 'EFT ' , ylab = ' Tempered.Water.Temperature.before.Temped.water.cooler ')
+
+
+```
+
+
+
+
+
+### Test with only true numbers for TPP19
+
+```{r}
+reg19 = lm( interpolated_acetic ~., data = data_19 )
+x = data_train$EFT_H
+y = reg19$fitted.values
+x_out = ac19$EFT
+fitted__acetic = spline(x = x ,y = y , xout = x_out )
+plot( ac19$EFT , ac19$acetic , col = 'blue' , main = 'TPP19' , xlab = 'EFT' , ylab = 'acetic')
+points( ac19$EFT , fitted__acetic$y , col = 'red')
+legend('topleft',legend=c('true' , 'predicted') , fill= c('blue','red') )
+plot( ac19$acetic , fitted__acetic$y )
+```
+
+### Test with only true numbers for TPP13
+
+```{r}
+reg13 = lm( interpolated_acetic ~., data = data_13 )
+x = data_13$EFT_H
+y = reg13$fitted.values
+x_out = ac13$EFT
+fitted__acetic = spline(x = x ,y = y , xout = x_out )
+plot( ac13$EFT , ac13$acetic , col = 'blue' , main ='TPP13' , xlab='EFT' , ylab = 'acetic' )
+points( ac13$EFT , fitted__acetic$y , col = 'red')
+legend('topleft',legend=c('true' , 'predicted') , fill= c('blue','red') )
+plot( ac13$acetic , fitted__acetic$y )
+```
+
+### Compare statistics
+
+```{r}
+
+mean_13 = apply(data_13 , 2 ,mean )
+mean_19 = apply(data_19 , 2 ,mean )
+combine_mean = cbind(mean_13,mean_19)
+
+compare = combine_mean[,1] - combine_mean[,2]
+compare[which( abs(compare) > 1)]
+plot( ac19$EFT , ac19$acetic ,col = 'blue' , xlab = 'EFT' , ylab ='acetic')
+points( ac13$EFT_H , ac13$acetic ,col = 'green' )
+legend('topleft',legend=c('TPP19' , 'TPP13') , fill= c('blue','green') )
+```
+
+### Buil Models
+
+```{r}
+p = ncol(data_19)   ### 
+col = ncol(data_19)
+x = as.matrix( data_19[,-p])
+xDesign = cbind(1, x)
+n = nrow(data_19)
+y = data_19$interpolated_acetic
+#parallelStartSocket(cpus = detectCores())
+
+vif_number = c()
+rsq = c()
+search = seq( 1e-4, 0.5  ,  1*1e-3  )
+lasso = glmnet( xDesign, y )
+for ( s in  search )
+{
+coef.glmnet(lasso , s = s)
+lasso_coef = as.matrix(  coef.glmnet(lasso , s = s)    )[-2]
+index = which( lasso_coef[-1] != 0 )
+# names(data_13)[index]
+lasso_var = paste( "interpolated_acetic","~" , paste( names(data_19)[index] , collapse = "+") )
+reg = lm( lasso_var , data = data_19)
+lasso_vif = vif(reg)
+vif_number =  c( vif_number , max( lasso_vif ) )
+rsq = c(rsq , summary(reg)$r.squared )
+}
+result = cbind(search , vif_number , rsq)
+start_change_index = which(  diff(result[,2]) != 0 )
+
+search_grid = search[start_change_index]
+mae_result = c()
+for ( s in search_grid )
+{
+  coef.glmnet(lasso , s = s)
+  lasso_coef = as.matrix(  coef.glmnet(lasso , s = s)    )[-2]
+  index = which( lasso_coef[-1] != 0 )
+  # names(data_13)[index]
+  lasso_var = paste( "interpolated_acetic","~" , paste( names(data_19)[index] , collapse = "+") )
+  reg = lm( lasso_var , data = data_19)
+  pred = predict( reg , newdata = data_13)
+  x = data_13$EFT_H
+  y = pred
+  x_out = ac13$EFT
+  predict__acetic = spline(x = x ,y = y , xout = x_out )
+  mae = mean( abs(ac13$acetic - predict__acetic$y)  )
+  mae_result = c( mae_result , mae)
+}
+plot( ac13$EFT_H , predict__acetic$y , col = 'red' , ylab = 'acetic' , xlab = 'EFT')
+points( ac13$EFT_H , ac13$acetic , col = 'blue')
+legend('topright',legend=c('predict' , 'true') , fill= c('red','blue') )
+
+
+cvfit = cv.glmnet(xDesign, y   )
+cvfit$lambda.min # 交叉验证平均误差最小时模型的lambda
+cvfit$lambda.1se 
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+one_se_coef = as.matrix( coef(cvfit)[-2] ) # 默认s = "lambda.1se"
+zero_coef = as.matrix( coef(cvfit, s = 0 )[-2]  )
+
+pred_min =   xDesign  %*% min_coef
+pred_zero = xDesign %*% zero_coef
+cat( sum( abs(pred_min - y )) /n  , sum( abs( pred_zero - y ))  / n  )
+```
+
+### Time series
+
+```{r}
+# using data TPP19
+interp_acetic = ts( data_19$interpolated_acetic )
+harvest = ts(data_19$harvest.flow)
+autoplot(interp_acetic)
+#auto.arima( y = interp_acetic  ,xreg = as.matrix( data_19[,-c(1 , 67)] ) )
+
+col_names = names(data_19)[-c(1,67)]
+forward_step = 1
+n = nrow(data_19)
+
+new_data_19 = cbind( data_19[(1+forward_step):n , ] , data_19[ (forward_step) : (n - forward_step), -c(1,67) ]  )
+new_colnames= paste( names(data_19)[-c(1,67)] , collapse = "_1 ")
+new_colnames = strsplit(new_colnames, " ")
+new_colnames[[1]][65] = 'Fermentor.fliud.to.ammonia...OD.meter.L.h_1'
+new_colnames = new_colnames[[1]]
+names(new_data_19) = c( names(data_19) , new_colnames)
+
+## Scale
+scale_data_19 = scale( new_data_19[,-67] )
+scale_meanstd = attributes( scale_data_19 )
+scale_data_19 = as.data.frame( scale_data_19)
+scale_data_19 = cbind( scale_data_19 , interpolated_acetic = new_data_19[,67])
+scale_reg_19 = lm(  interpolated_acetic ~. , data =scale_data_19    )
+summary(scale_reg_19)
+
+new_reg_19 = lm(  interpolated_acetic ~. , data = new_data_19    )
+new_step_19 = step( new_reg_19)
+### 
+# col = ncol(new_data_19)
+# x = as.matrix( new_data_19[, -67])
+# xDesign = cbind(1, x)
+# n = nrow(data_19)
+# y = new_data_19$interpolated_acetic
+# cvfit = cv.glmnet(xDesign, y   )
+# cvfit$lambda.1se 
+# plot(cvfit)
+# min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+col = ncol(scale_data_19)
+x = as.matrix( scale_data_19[, -col])
+xDesign = cbind(1, x)
+n = nrow(scale_data_19)
+y = scale_data_19$interpolated_acetic
+cvfit = cv.glmnet(xDesign, y   )
+cvfit$lambda.1se 
+plot(cvfit)
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+
+# pvalue = 2*pt( -abs( t ), df = n-21)
+
+
+lasso_coef = as.matrix(  coef.glmnet(cvfit , s = cvfit$lambda.1se)    )[-2]
+index = which( lasso_coef[-1] != 0 )
+# names(data_13)[index]
+lasso_var = paste( "interpolated_acetic","~" , paste( names(new_data_19)[index] , collapse = "+") )
+reg = lm( lasso_var , data = new_data_19)
+plot(reg)
+summary(reg)
+```

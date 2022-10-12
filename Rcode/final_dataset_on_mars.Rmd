@@ -1,0 +1,195 @@
+---
+title: "final_dataset_on_mars"
+author: "Peian"
+date: "2022-08-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2.in.offgas.." ) ] 
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+data19 = data19[,-c(3:4 , 51:57)]
+data_original = data19
+```
+
+### load the offline data
+```{r}
+offline = read.csv("C:/Users/85212/Desktop/Pro-data/joinacids.csv", header=TRUE)
+offline = dplyr:: filter( offline , EFT_H < 361)
+offline_time = offline$EFT_H
+off_data = c()
+x_out = data19$EFT_H
+nm = names(offline)
+for (j in 2:9)
+{
+  y = offline[,j]
+  index = complete.cases( y )
+  x = offline_time[index]
+  y = y[index]
+  interpolated = spline(x = x ,y = y , xout = x_out )$y
+  interpolated[ which(interpolated < 0) ] = 0
+  off_data = cbind( off_data , interpolated )
+}
+colnames(off_data) = names(offline)[2:9]
+off_data = as.data.frame( off_data )
+# join the offline data
+p = ncol(data19)
+data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+```
+
+
+### de-noise
+```{r}
+### de noise   ----------------------------------------------------------
+de_noise = function( data19 , thres = 6 ,  windows_size = 3 , sd_factor = 2 )
+{
+  p = ncol(data19)
+  cols = count_dataframe( data19 , thres = thres ) 
+  cols = cols$columns
+  temp = c(cols,p)
+  columns = c()
+  for ( i in 1:p)
+  {
+    if  ( length( intersect(i , temp) ) !=0 )
+    {
+      next
+    }
+    columns= c(columns , i )
+  }
+  nm = names(data19)
+  time = data19$EFT_H
+  for (j in columns)
+  {
+    if (nm[j] == "interpolated_acetic")
+    {
+      next
+    }
+    x = data19[,j]
+    std = sd(x)
+    difference = abs( diff(x) )
+    index_noise = which( difference > sd_factor *std )
+    for (i in (index_noise+1) ){
+      if ( i > windows_size  && i <= length(x) - windows_size - 1 )
+      {
+        estimate = mean_xt( x , i , windows_size)
+        x[i] = estimate
+        if (sum(is.na(x) > 0))
+          {
+            stop("has NULL value")
+            break
+          }
+      }
+    }
+    data19[,j] = x
+  }
+  return (data19)
+}
+
+```
+### denoise data
+```{r}
+p = ncol(data19)
+#data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+denoise_original = cbind( de_noise( data19[,-p] ) ,interpolated_acetic = data19[,p] )
+denoise_combine =cbind(denoise_original[,-p] , off_data , interpolated_acetic= data19[,p])
+```
+### index 3 is with the offline
+```{r}
+index1 = c(53,65,30,28,21,3,32,25,18,46,27,16,49,48,15,51,19,5,31,11,38,43,6,68,44,33,4,2,52,17,13,10,9,14,66,12,63,7,8,45,40,50,39,37,64,42,47,41)
+index2 = c(53,65,30,28,3,32,18,46,27,20,16,49,19,5,31,11,38,43,6,68,44,33,4,2,52,17,13,66,12,63,7,45,40,50,39,37,64,42,47,41)
+index3 = c(66,57,58,50,23,25,65,27,59,63,1,43,29,24,2,62,15,12,46,13,3,16,61,8,28,40,14,35,30,10,4,49,54,5,9,41,53,64,34,37,36,42,39,44,38)
+```
+
+### Selecting the data closest to real data
+```{r , echo = FALSE}
+set.seed(825)
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )
+}
+
+data_original = data_original[,-1]
+data_combine = data_combine[,-1]
+denoise_original = denoise_original[,-1]
+denoise_combine = denoise_combine[,-1]
+
+train_original = data_original[-index , ]
+test_original = data_original[index,]
+train_combine = data_combine[-index , ]
+test_combine = data_combine[index , ]
+
+train_denoise_original = denoise_original[-index,]
+test_denoise_original = denoise_original[index,]
+train_denoise_combine = denoise_combine[-index,]
+test_denoise_combine = denoise_combine[index,]
+cat("\n")
+dim(data_original)
+dim(data_combine)
+dim(denoise_original)
+dim(denoise_combine)
+```
+
+
+```{r}
+fitControl = trainControl( method = "none" )
+fitControl = trainControl( method = "repeatedcv", number = 5, repeats = 3 )
+mars_grid = expand.grid( degree =2:3,  nprune = 30:64 )
+# for original, degree = 2, nprune = 35
+# for denoise, degree = 3 , nprune = 50
+mars = modelTrain( data = denoise_combine , method = "earth" , trControl = fitControl,
+                  tuneGrid = mars_grid, cpu = cpu , test = test_denoise_combine)
+plot(mars$model)
+```
+
+
+```{r}
+original_RMSE = mars$RMSE
+denoise_RMSE = mars$RMSE
+```
+
+# get result
+```{r}
+library(tidyverse)
+car$finalModel$coefficients %>%
+  as.data.frame() %>%
+  mutate( parameter = row.names(.)) %>%
+  select( parameter, coef = y ) %>%
+  knitr::kable( align = c('lc'), digits = 2 )
+
+
+mars$model$finalModel$coefficients %>%
+  as.data.frame() %>%
+  mutate( parameter = row.names(.)) %>%
+  select( parameter, coef = y )  %>% 
+  knitr::kable( align = c('lc'), digits = 2 )
+```
+
+# plot result
+```{r}
+imp = varImp( mars$model  ) 
+imp = imp$importance %>%
+  as.data.frame() %>%
+  mutate( variable = row.names(.) ) %>%
+  filter( Overall > 0 )
+
+jpeg("MARS.jpg", width = 1000  , height = 1000)
+# 2. Create the plot
+plotmo( mars$model, all1 = T, all2 = F, degree1 = imp$variable, degree2 = imp$variable ) 
+# 3. Close the file
+dev.off()
+
+```
+

@@ -1,0 +1,53 @@
+---
+title: "M5p"
+author: "Peian"
+date: '2022-07-14'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Version of train
+### M5 tree
+```{r}
+set.seed(825)
+m5Grid = expand.grid(pruned = c("Yes"), smoothed = c("No"), rules = c("Yes") ) 
+
+m5 = modelTrain( train, "M5" , trControl = fitControl , tuneGrid = m5Grid , cpu = 16)
+```
+
+```{r}
+whichBest = best(m5$results, "RMSE" , maximize = FALSE) 
+m5$results[whichBest,]
+Predict = predict( m5, newdata = test )
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+result = cbind( result, m5 = RMSE)
+```
+
+### Version of default, which produces plot
+```{r}
+m5 = M5P(interpolated_acetic ~ ., 
+         data = denoise_combine[,index5], 
+         control = NULL#Weka_control( N = FALSE , U = TRUE , R = TRUE )
+         )
+Predict = predict( m5, newdata = test_denoise_combine)
+RMSE =  mean( (test$interpolated_acetic - Predict )**2 )**0.5
+RMSE
+
+svg(file="M5p_tree.svg" , width = 100, height = 120 )
+plot(m5)
+dev.off()
+
+ModelTree=as.matrix(scan(text=.jcall(m5$classifier, "S","toString") ,sep="\n", what=""))[-c(1:2, 6), ,drop=FALSE] 
+
+write.csv(ModelTree, file ="M5Tree_without_EFT", sep ="", row.names =TRUE, col.names =TRUE, quote =TRUE)
+
+# write_to_dot(m5)
+# ff = tempfile()
+# write_to_dot(m5, ff)
+# plot(agread(ff))
+
+```

@@ -1,0 +1,377 @@
+---
+title: "Caret"
+author: "Peian"
+date: '2022-07-03'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(AppliedPredictiveModeling)
+transparentTheme(trans = .4)
+library(caret)
+library(gbm)
+library(mboost)
+library(KRLS) # Polynomial Kernel Regularized Least Squares
+library(monomvn) # Bayesian Ridge Regression (Model Averaged)
+library(doParallel)
+```
+
+```{r}
+unregister_dopar <- function() {
+  env <- foreach:::.foreachGlobals
+  rm(list=ls(name=env), pos=env)
+}
+```
+
+```{r}
+featurePlot(x = iris[, 1:4], 
+            y = iris$Species, 
+            plot = "pairs",
+            ## Add a key at the top
+            auto.key = list(columns = 3))
+```
+```{r}
+library(mlbench)
+data(BostonHousing)
+regVar <- c("age", "lstat", "tax")
+str(BostonHousing[, regVar])
+
+featurePlot(x = BostonHousing[, regVar], 
+            y = BostonHousing$medv, 
+            plot = "scatter",
+            type = c("p", "smooth"),
+            span = .5,
+            layout = c(3, 1))
+```
+## 3.2 Zero- and Near Zero-Variance Predictors
+
+```{r}
+data(mdrr)
+data.frame(table(mdrrDescr$nR11))
+nzv <- nearZeroVar(mdrrDescr, saveMetrics= TRUE)
+nzv[nzv$nzv,][1:10,]
+
+nzv <- nearZeroVar(mdrrDescr)
+filteredDescr <- mdrrDescr[, -nzv]
+filteredDescr
+```
+## 3.3 Identifying Correlated Predictors
+
+```{r}
+descrCor <-  cor(filteredDescr)
+highCorr <- sum(abs(descrCor[upper.tri(descrCor)]) > .999)
+highCorr
+```
+
+```{r}
+highlyCorDescr <- findCorrelation(descrCor, cutoff = .75)
+filteredDescr <- filteredDescr[,-highlyCorDescr]
+descrCor2 <- cor(filteredDescr)
+summary(descrCor2[upper.tri(descrCor2)])
+```
+
+## 3.4 Linear Dependencies
+The function `findLinearCombos`
+```{r}
+ltfrDesign <- matrix(0, nrow=6, ncol=6)
+ltfrDesign[,1] <- c(1, 1, 1, 1, 1, 1)
+ltfrDesign[,2] <- c(1, 1, 1, 0, 0, 0)
+ltfrDesign[,3] <- c(0, 0, 0, 1, 1, 1)
+ltfrDesign[,4] <- c(1, 0, 0, 1, 0, 0)
+ltfrDesign[,5] <- c(0, 1, 0, 0, 1, 0)
+ltfrDesign[,6] <- c(0, 0, 1, 0, 0, 1)
+```
+
+```{r}
+comboInfo <- findLinearCombos(ltfrDesign)
+comboInfo
+```
+
+```{r}
+ltfrDesign[, -comboInfo$remove]
+```
+
+## 3.6 Centering and Scaling
+```{r}
+set.seed(96)
+inTrain <- sample(seq(along = mdrrClass), length(mdrrClass)/2)
+
+training <- filteredDescr[inTrain,]
+test <- filteredDescr[-inTrain,]
+trainMDRR <- mdrrClass[inTrain]
+testMDRR <- mdrrClass[-inTrain]
+
+preProcValues <- preProcess(training, method = c("center", "scale"))
+
+trainTransformed <- predict(preProcValues, training)
+testTransformed <- predict(preProcValues, test)
+```
+## 3.8 Transforming Predictors
+### Box-Cox
+```{r}
+preProcValues2 <- preProcess(training, method = "BoxCox")
+trainBC <- predict(preProcValues2, training)
+testBC <- predict(preProcValues2, test)
+preProcValues2
+```
+
+## 3.9 Putting It All Together
+```{r}
+library(AppliedPredictiveModeling)
+data(schedulingData)
+str(schedulingData)
+```
+
+```{r}
+pp_hpc <- preProcess(schedulingData[, -8], 
+                     method = c("center", "scale", "YeoJohnson"))
+pp_hpc
+```
+```{r}
+transformed <- predict(pp_hpc, newdata = schedulingData[, -8])
+head(transformed)
+```
+
+```{r}
+pp_no_nzv <- preProcess(schedulingData[, -8], 
+                        method = c("center", "scale", "YeoJohnson", "nzv"))
+pp_no_nzv
+predict(pp_no_nzv, newdata = schedulingData[1:6, -8])
+```
+# 4 Data Splitting
+## 4.1 Simple Splitting Based on the Outcome
+```{r}
+library(caret)
+set.seed(3456)
+trainIndex <- createDataPartition(iris$Species, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+irisTrain <- iris[ trainIndex,]
+irisTest  <- iris[-trainIndex,]
+```
+
+## 4.2 Splitting Based on the Predictors
+Also, the function `maxDissim` can be used to create sub–samples using a maximum dissimilarity approach (Willett, 1999).
+
+```{r}
+library(mlbench)
+data(BostonHousing)
+
+testing <- scale(BostonHousing[, c("age", "nox")])
+set.seed(5)
+## A random sample of 5 data points
+startSet <- sample(1:dim(testing)[1], 5)
+samplePool <- testing[-startSet,]
+start <- testing[startSet,]
+newSamp <- maxDissim(start, samplePool, n = 20)
+head(newSamp)
+```
+## 4.4 Simple Splitting with Important Groups
+Confused.
+```{r}
+set.seed(3527)
+subjects <- sample(1:20, size = 80, replace = TRUE)
+table(subjects)
+folds <- groupKFold(subjects, k = 15) 
+folds
+```
+
+# 5 Model Training and Tuning
+## 5.1 Model Training and Parameter Tuning
+
+```{r}
+library(mlbench)
+data(Sonar)
+str(Sonar[, 1:10])
+library(caret)
+set.seed(998)
+inTraining <- createDataPartition(Sonar$Class, p = .75, list = FALSE)
+training <- Sonar[ inTraining,]
+testing  <- Sonar[-inTraining,]
+```
+
+## 5.3 Basic Parameter Tuning
+To use a random search, use the option search = "random" in the call to trainControl. In this situation, the tuneLength parameter defines the total number of parameter combinations that will be evaluated.
+```{r}
+fitControl <- trainControl( method = "repeatedcv", number = 10, repeats = 10 , classProbs = TRUE, search = "random" )
+```
+
+```{r}
+set.seed(825)
+gbmFit1 <- train(Class ~ ., data = training, 
+                 method = "gbm", 
+                 trControl = fitControl,
+                 ## This last option is actually one
+                 ## for gbm() that passes through
+                 verbose = FALSE)
+gbmFit1
+```
+
+## 5.4 Notes on Reproducibility
+To set the model fitting seeds, `trainControl` has an additional argument called seeds that can be used.
+
+### 5.5.2 Alternate Tuning Grids
+```{r}
+gbmGrid <-  expand.grid(interaction.depth = c(1, 5, 9), 
+                        n.trees = (1:30)*50, 
+                        shrinkage = 0.1,
+                        n.minobsinnode = 20)
+                        
+nrow(gbmGrid)
+
+set.seed(825)
+gbmFit2 <- train(Class ~ ., data = training, 
+                 method = "gbm", 
+                 trControl = fitControl, 
+                 verbose = FALSE, 
+                 ## Now specify the exact models 
+                 ## to evaluate:
+                 tuneGrid = gbmGrid,
+                 metric = "ROC")
+gbmFit2
+```
+
+```{r}
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 10,
+                           repeats = 2,
+                           ## Estimate class probabilities
+                           classProbs = TRUE,
+                           ## Evaluate performance using 
+                           ## the following function
+                           summaryFunction =  twoClassSummary
+                           )
+
+set.seed(825)
+gbmFit3 <- train(Class ~ ., data = training, 
+                 method = "gbm", 
+                 trControl = fitControl, 
+                 verbose = FALSE, 
+                 tuneGrid = gbmGrid,
+                 ## Specify which metric to optimize
+                 metric = "ROC",tuneLength = 8)
+gbmFit3
+```
+
+
+## 5.6 Choosing the Final Model
+```{r}
+whichTwoPct <- tolerance(gbmFit3$results, metric = "ROC", 
+                         tol = 2, maximize = TRUE)  
+cat("best model within 2 pct of best:\n")
+gbmFit3$results[whichTwoPct,1:6]
+```
+## 5.7 Extracting Predictions and Class Probabilities
+```{r}
+predict(gbmFit3, newdata = head(testing))
+predict(gbmFit3, newdata = head(testing), type = "prob")
+```
+
+### 5.8.2 Between-Models
+Benchmarking
+```{r}
+set.seed(825)
+svmFit <- train(Class ~ ., data = training, 
+                 method = "svmRadial", 
+                 trControl = fitControl, 
+                 preProc = c("center", "scale"),
+                 tuneLength = 8,
+                 metric = "ROC")
+set.seed(825)
+rdaFit <- train(Class ~ ., data = training, 
+                 method = "rda", 
+                 trControl = fitControl, 
+                 tuneLength = 4,
+                 metric = "ROC")
+```
+
+```{r}
+resamps <- resamples(list(GBM = gbmFit3,
+                          SVM = svmFit,
+                          RDA = rdaFit))
+resamps
+```
+
+```{r}
+bwplot(resamps, layout = c(3, 1))
+```
+## 5.9 Fitting Models Without Parameter Tuning
+If we have already a tunning parameter
+```{r}
+fitControl <- trainControl(method = "none", classProbs = TRUE)
+
+set.seed(825)
+gbmFit4 <- train(Class ~ ., data = training, 
+                 method = "gbm", 
+                 trControl = fitControl, 
+                 verbose = FALSE, 
+                 ## Only a single model can be passed to the
+                 ## function when no resampling is used:
+                 tuneGrid = data.frame(interaction.depth = 4,
+                                       n.trees = 100,
+                                       shrinkage = .1,
+                                       n.minobsinnode = 20),
+                 metric = "ROC")
+gbmFit4
+predict(gbmFit4, newdata = head(testing))
+```
+
+# 9 Parallel Processing
+```{r}
+cl <- makePSOCKcluster( detectCores())
+registerDoParallel(cl)
+
+## All subsequent models are then run in parallel
+model <- train(Class ~ ., data = training, method = "rf")
+
+## When you are done:
+stopCluster(cl)
+```
+
+# 15 Variable Importance
+```{r}
+gbmImp <- varImp(gbmFit3, scale = FALSE)
+gbmImp
+```
+## 20.3 Recursive Feature Elimination via caret
+```{r}
+library(caret)
+library(mlbench)
+library(Hmisc)
+library(randomForest)
+
+n <- 100
+p <- 40
+sigma <- 1
+set.seed(1)
+sim <- mlbench.friedman1(n, sd = sigma)
+colnames(sim$x) <- c(paste("real", 1:5, sep = ""),
+                     paste("bogus", 1:5, sep = ""))
+bogus <- matrix(rnorm(n * p), nrow = n)
+colnames(bogus) <- paste("bogus", 5+(1:ncol(bogus)), sep = "")
+x <- cbind(sim$x, bogus)
+y <- sim$y
+normalization <- preProcess(x)
+x <- predict(normalization, x)
+x <- as.data.frame(x)
+subsets <- c(1:5, 10, 15, 20, 25)
+set.seed(10)
+
+ctrl <- rfeControl(functions = lmFuncs,
+                   method = "repeatedcv",
+                   repeats = 5,
+                   verbose = FALSE)
+
+lmProfile <- rfe(x, y,
+                 sizes = subsets,
+                 rfeControl = ctrl)
+
+lmProfile
+```
+
+
+

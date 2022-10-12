@@ -29,13 +29,15 @@ Sys.setenv("PATH" ="D:/Rsoftware/mosek/9.3/tools/platform/win64x86/bin" , sep=""
 
 
 ```{r}
-#library(glmnet)
-library(CVXR)
-#library(Rmosek)
-#D:\Rsoftware\mosek\9.3\tools\platform\win64x86\rmosek
 
-source("D:/Rsoftware/9.3/tools/platform/win64x86/rmosek/builder.R")
+Sys.getpid()
+library(CVXR)
+library(Rmosek)
+source("C:/Program Files/Mosek/9.3/tools/platform/win64x86/rmosek/builder.R")
 attachbuilder()
+install.rmosek(INSTALL_opts="--no-test-load")
+\Program Files (x86)\Windows Kits\10\Debuggers\x64\gflags /i Rterm.exe +sls
+
 install.rmosek()   # MSK_BINDIR = "D:\\Rsoftware\\R-4.2.0\\library" 
 installed_solvers()
 ```

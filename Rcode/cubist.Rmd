@@ -1,0 +1,27 @@
+---
+title: "cubist"
+author: "Peian"
+date: "2022-08-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Cubist)
+```
+
+```{r}
+library(mlbench)
+data(BostonHousing)
+
+## 1 committee, so just an M5 fit:
+mod1 <- cubist(x = BostonHousing[, -14], y = BostonHousing$medv)
+mod1
+Predict = predict(mod1 , new = BostonHousing[, -14] )
+dotplot(mod1, what = "coefs ") # splits
+s = summary(mod1)
+```
+

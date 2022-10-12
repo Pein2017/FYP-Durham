@@ -1,0 +1,301 @@
+---
+title: "True_data_and_factorize"
+author: "Peian Lu"
+date: '2022-06-14'
+output:
+  pdf_document: 
+    latex_engine: xelatex
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+options(tinytex.verbose = TRUE)
+options(use.ragg = TRUE)
+```
+
+
+```{r}
+#library(tibble)
+#library(dplyr)
+library(ggplot2)
+#library(tidyr)
+library(purrr)
+library(parallel)
+library(parallelMap)
+library(mlr)
+library(tidyverse)
+
+library(car)
+library(forecast)
+require(gam)
+require(monomvn)
+require(LearnBayes)
+require(glmnet)
+require(nortest)
+require(caret)
+set.seed(1)
+```
+
+### Pre-process function
+```{r , echo = FALSE}
+remove_columns = function( data_train , data_test = NULL)
+{
+remove_col = c()
+for (j in 1:(ncol(data_train)-2) ) 
+{
+  if (  mean(data_train[,j]) < 0.01 | length( table( data_train[,j] ) ) == 1  )
+  remove_col = c(remove_col , j)
+  
+}
+return ( remove_col )
+}
+
+correct = function( data_train , thres = 0.2 )
+{
+  data_train =  data_train[complete.cases(data_train) ,]
+  for ( j in 1:ncol( data_train ) )
+  {
+    index = which( data_train[,j] < thres)
+    data_train[index,j] = 0
+  }
+  return (data_train)
+}
+```
+
+### Counting classes function 
+```{r , echo = FALSE}
+count_dataframe = function( data , thres =5 )
+{
+  index = c()
+  collections = c()
+  for ( j in 1:ncol(data) )
+  {
+    cont = table( data[,j] )
+    collection = length( cont )
+    if ( collection < thres ) 
+    {
+      index = c(index , j )
+      collections = c( collections , collection )
+      
+    }
+  }
+  return ( list( columns = index  , count = collections ) )
+}
+
+
+
+
+```
+
+### Ploting function 
+```{r , echo = FALSE}
+plot_data = function(  data , index , counts=-1 )
+{
+  par( mfrow = c(2,1 ) )
+  name = names(data)[index]
+  main = paste( name , "with counts: ", counts)
+  plot( data[,index] , data$interpolated_acetic , main = main , xlab = name , ylab = 'acid' ) 
+  plot( data$EFT_H , data.matrix( data[,index] ) , xlab = 'EFT ' , ylab = name)
+}
+```
+
+### Merging by Cubic Spline Interpolation function
+
+```{r , echo = FALSE}
+cb_merge = function( ac19 ,data  )
+{
+  x = ac19$EFT
+  y = ac19$acetic
+  x_out = data$EFT_H 
+  interpolated__acetic = spline(x = x ,y = y , xout = x_out )
+  data = cbind(data , interpolated_acetic = interpolated__acetic$y ) 
+  return (data)
+}
+
+```
+
+
+### data19
+
+```{r , echo = FALSE}
+data19 = read.csv("C:/Users/85212/Desktop/Pro-data/TPP19_online.csv", header=TRUE)
+ac19 = read.csv( "C:/Users/85212/Desktop/Pro-data/TPP19_ac.csv" ,header=TRUE) 
+data19= data19[,-2]
+
+data13 = read.csv("C:/Users/85212/Desktop/Pro-data/TPP13_online.csv", header=TRUE)
+ac13 = read.csv( "C:/Users/85212/Desktop/Pro-data/TPP13_ac.csv" ,header=TRUE) 
+
+combine_name = cbind( names(data13) , names(data19) )
+
+ac19 = dplyr:: filter( ac19 , EFT < 360)
+data19 = dplyr:: filter( data19 , EFT_H < 360)
+
+ac13 = dplyr:: filter( ac13 , EFT_H < 360)
+data13 = dplyr:: filter( data13 , EFT_H < 360)
+
+```
+
+##Pre-process
+
+```{r , echo = FALSE}
+
+index = c( which( names(data19) == 'headspace.pressure') , which(names(data19) == 'pressure.at.position.4') )
+data19 = data19[,-index]  ## remove constant headspac19e.pressure
+# rbind( names(data_13) , names(data_19) )
+data19 = correct(data19)
+remove_index = remove_columns( data19 )
+data19 = data19[, - remove_index ]
+#summary(data19)
+```
+
+
+### Factorize
+```{r , echo = FALSE}
+# for ( j in factor_cols )
+# {
+#   data19[,j] = as.factor( data19[,j] )
+# }
+
+```
+
+
+### Selecting the data closest to real data
+
+```{r , echo = FALSE}
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which(   abs( ac19$EFT[i] - data19$EFT_H)   == min( abs( ac19$EFT[i] - data19$EFT_H) )  )
+}
+cbind( data19$EFT_H[index] , ac19$EFT)
+```
+
+
+### New Training with cloest data
+```{r , echo = FALSE}
+
+data_new_19 = data19[index, ]
+data_new_19 = cb_merge( ac19 , data_new_19 )
+counting = count_dataframe( data_new_19 , thres = 6)
+factor_cols = counting$columns
+factor_counts = counting$count
+plot( ac19$acetic , col = 'blue')
+points( data_new_19$interpolated_acetic , col = 'red')
+
+# for ( j in factor_cols )
+# {
+#   data_new_19[,j] = as.factor( data_new_19[,j] )
+# }
+
+# x = ac19$EFT
+# y = ac19$acetic
+# x_out = data_new_19$EFT_H
+# interpolated__acetic = spline(x = x ,y = y , xout = x_out )
+# #interpolated__formic = spline( x = x , y = ac19$formic , xout = x_out)
+# data_new_19 = cbind(data_new_19 , interpolated_acetic = interpolated__acetic$y ) 
+
+reg19 = lm( interpolated_acetic ~., data = data_new_19 )
+x = data_new_19$EFT_H
+y = reg19$fitted.values
+x_out = ac19$EFT
+fitted__acetic = spline(x = x ,y = y , xout = x_out )
+plot( ac19$EFT , ac19$acetic , col = 'blue' , main = 'TPP19' , xlab = 'EFT' , ylab = 'acetic')
+points( ac19$EFT , fitted__acetic$y , col = 'red')
+legend('topleft',legend=c('true' , 'predicted') , fill= c('blue','red') )
+plot( ac19$acetic , fitted__acetic$y )
+summary(reg19)
+step_reg = step(reg19)
+summary(step_reg)
+```
+
+### Lasso with new data
+```{r , echo = FALSE}
+p = ncol(data_new_19)   ### 
+col = ncol(data_new_19)
+x = as.matrix( data_new_19[,-p])
+xDesign = cbind(1, x)
+n = nrow(data_new_19)
+y = data_new_19$interpolated_acetic
+#parallelStartSocket(cpus = detectCores())
+cvfit = cv.glmnet(xDesign, y  , nfolds =  5  )
+plot(cvfit)
+cvfit$lambda.min # 交叉验证平均误差最小时模型的lambda
+cvfit$lambda.1se
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+one_se_coef = as.matrix( coef(cvfit)[-2] ) # 默认s = "lambda.1se"
+zero_coef = as.matrix( coef(cvfit, s = 0 )[-2]  )
+
+pred_min =   xDesign  %*% min_coef
+pred_one_se = xDesign  %*% one_se_coef
+pred_zero = xDesign %*% zero_coef
+cat(  "mse of pred_min: ", sum( abs(pred_min - y )) /n  ,
+     "mse of pred_one_se: ",sum( abs(pred_one_se - y )) /n , 
+     "mse of pred_zero: ",sum( abs( pred_zero - y ))  / n   )
+```
+
+### Refit  LR
+```{r , echo = FALSE}
+
+lasso_coef = as.matrix(  coef.glmnet(cvfit , s = cvfit$lambda.1se)    )[-2]
+index = which( lasso_coef[-1] != 0 )
+# names(data_13)[index]
+new_data_19 = data_new_19[, c(index,p) ]
+counting = count_dataframe( new_data_19 , thres = 6)
+factor_cols = counting$columns
+factor_counts = counting$count
+for ( j  in factor_cols )
+{
+  new_data_19[,j] = as.factor( new_data_19[ , j ])
+}
+
+lasso_var = paste( "interpolated_acetic","~" , paste( names(data_new_19)[index] , collapse = "+") )
+reg = lm( lasso_var , data = new_data_19)
+step_reg = step( reg )
+summary(step_reg)
+```
+### Some intuitive plots
+```{r , echo = FALSE}
+temp19 = cbind(new_data_19 ,  EFT_H = data_new_19$EFT_H )
+index = which( names( temp19 ) == 'oxygen..pressure.to.fermentor.loop.mixture')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'dissolved.oxygen.at.stn5')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'dissolved.oxygen.at.stn1')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'Tempered.Water.Temperature.before.Temped.water.cooler')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'optical.density')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'Station.5.Loop.Temperature')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'oxygen..pressure.to.fermentor.loop.mixture')
+plot_data(temp19 ,   index  ) 
+
+index = which( names( temp19 ) == 'phosphoric.acid.flow')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'Cooling.loop.A.valve.opening..')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'ammonia.totalier')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'phosphoric.acid.flow')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'Fermentor.fliud.to.ammonia...OD.meter.L.h')
+plot_data(temp19 ,   index ) 
+
+index = which( names( temp19 ) == 'O2.in.offgas..')
+plot_data(temp19 ,   index ) 
+
+```
+
+

@@ -1,0 +1,70 @@
+---
+title: "Performance_plots"
+author: "Peian"
+date: "2022-08-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+result = read.csv(file.choose(),header = TRUE)
+rownames(result) = c("full_model","sub_model")
+result = result[-1]
+result = as.matrix(result)
+```
+
+# barplot of full VS sub
+```{r}
+barplot( result,  col = c(2,5),
+        xlab = "leaners" , ylab = "mean percentage absolute error in %",  yaxt = "n",
+        legend.text = rownames(result),  args.legend = list(x = "topleft", bty = "n", inset=c(0.15, 0)),
+        beside = TRUE  ,las=2 )
+axis(2, at=pretty(result), lab=paste0(pretty(result) * 100, "%"), las=TRUE)
+```
+
+
+# Importance
+```{r}
+imp = read.csv(file.choose(),header = TRUE)
+rownames(imp) = imp$variables
+imp = imp[-1]
+imp = as.matrix(imp)
+imp = (imp - min(imp) )/( max(imp) - min(imp))
+
+imp = imp[1:10,1]
+
+names( imp ) = c("NH4_Prod" ,"Ratio_stn4","Vessel","Ratio_stn5","O2_stn4",
+                 "O2_stn2", "CH4_stn2","Level_sep","dO2_stn1","NH3Online" )
+
+library(scales)
+# svg(file="variables_importance.svg" , width = 5, height = 5 )
+barplot( imp,  col=rainbow(13), main = "Top 10 predictors ",
+        xlab = NULL, ylab = "Standardised importance in %" , yaxt = "n", 
+        legend.text = rownames(imp),  args.legend = list(x = "topleft", bty = "n", inset=c(0.15, 0)),
+         las = 2
+       )
+yticks = pretty_breaks(n=5)(c(0,imp) )
+axis(2, at=yticks , lab=percent(yticks), las=TRUE)
+# dev.off()
+
+```
+# VIF changes
+```{r}
+library(car)
+reg1 = lm( interpolated_acetic ~., data = denoise_combine )
+vf1 = vif(reg1)
+
+reg2 = lm( interpolated_acetic ~., data = denoise_combine[,index5] )
+vf2 = rep( NULL,64)
+vf2[index5[-44]] = vif(reg2)
+
+plot(vf, xlab = 'Predictors' , ylab = "VIF" , col = 5 , main = "VIF of Predictors ")
+points(vf2, col=2)
+legend( "topright", legend=c("full predictors ", "selected predictors"), pch = c(1,1),
+       col=c(5, 2) )
+```
+

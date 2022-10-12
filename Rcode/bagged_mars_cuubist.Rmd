@@ -1,0 +1,66 @@
+---
+title: "bagMars and cubist_commit"
+author: "Peian"
+date: "2022-08-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Go
+## Pre-process
+```{r}
+set.seed(825)
+cpu = detectCores()
+tuneLength = 2
+repeats = 2
+folds = 3
+total = repeats * folds 
+result = c() ##  Record for performances
+lambdaSearch = seq( 0, 1 , length.out = 30) 
+lambdaSearch[2] = 1e-5   ## set a small number to check whether lasso works #
+alphaSearch = seq(0,1, length.out = 10)
+# Set the seeds
+seeds = vector(mode = "list", length = total+1)
+for(i in 1:total) seeds[[i]]= sample.int(n=10000, 1000 )
+seeds[[ (total+1) ]]=sample.int(10000, 1)
+# Set fitControl for the trControl
+fitControl = trainControl( method = "repeatedcv", number = folds, repeats = repeats , search = "random" ,seed = seeds)
+#fitControl = trainControl( method = "none" )
+```
+
+```{r}
+mars_grid = expand.grid( degree = 3,  nprune = 45 )
+```
+
+```{r}
+mars = modelTrain( data = denoise_combine[, index5] , method = "bagEarth" , 
+                   trControl = fitControl,  preProcess = NULL,
+                   tuneGrid = mars_grid, cpu = cpu , test = test_denoise_combine)
+```
+
+```{r}
+cubist_grid =expand.grid(committees =c(1,10,20,50,75,100), neighbors = c(0,1,2,5,9))
+cubist = modelTrain( data = denoise_combine[,index5] , method = "cubist" , 
+                     trControl = fitControl,
+                     tuneGrid = cubist_grid , cpu = cpu , 
+                     test = test_denoise_combine)
+ggplot(cubist$model)
+cubist$model$bestTune
+cubists
+```
+```{r}
+ggplot(cubist$model)
+```
+```{r}
+#library(ggplot2)
+ggplot(data = ac19, mapping = aes(x = EFT_H, y =acetic)) + 
+  geom_point()  + 
+  xlab("EFT") +
+  ylab("acetic acid") 
+
+```
+
+

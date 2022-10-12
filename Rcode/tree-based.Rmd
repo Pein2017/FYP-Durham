@@ -1,0 +1,289 @@
+---
+title: "Regression-Tree"
+output: html_document
+date: '2022-06-21'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#library(tibble)
+#library(dplyr)
+library(ggplot2)
+#library(tidyr)
+library(purrr)
+library(parallel)
+library(parallelMap)
+library(mlr)
+library(tidyverse)
+
+library(car)
+library(forecast)
+require(gam)
+require(monomvn)
+require(LearnBayes)
+require(glmnet)
+require(nortest)
+set.seed(1)
+```
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader()
+data19 = temp$data_19
+ac19 = temp$ac_19
+```
+
+
+### Selecting the data closest to real data
+
+```{r , echo = FALSE}
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which(   abs( ac19$EFT[i] - data19$EFT_H)   == min( abs( ac19$EFT[i] - data19$EFT_H) )  )
+}
+cbind( data19$EFT_H[index] , ac19$EFT)
+```
+
+```{r}
+data_new_19 = data19[index, ]
+```
+### Lasso with cloest data
+```{r}
+p = ncol(data_new_19)   ### 
+col = ncol(data_new_19)
+x = as.matrix( data_new_19[,-p])
+
+xDesign = cbind(1, x)
+n = nrow(data_new_19)
+y = data_new_19$interpolated_acetic
+#parallelStartSocket(cpus = detectCores())
+cvfit = cv.glmnet(xDesign, y  , nfolds =  5  )
+plot(cvfit)
+cvfit$lambda.min # 交叉验证平均误差最小时模型的lambda
+cvfit$lambda.1se
+min_coef = as.matrix( coef(cvfit, s = "lambda.min")[-2] )
+one_se_coef = as.matrix( coef(cvfit)[-2] ) # 默认s = "lambda.1se"
+zero_coef = as.matrix( coef(cvfit, s = 0 )[-2]  )
+
+pred_min =   xDesign  %*% min_coef
+pred_one_se = xDesign  %*% one_se_coef
+pred_zero = xDesign %*% zero_coef
+cat(  "mse of pred_min: ", sum( abs(pred_min - y )) /n  ,
+     "mse of pred_one_se: ",sum( abs(pred_one_se - y )) /n , 
+     "mse of pred_zero: ",sum( abs( pred_zero - y ))  / n   )
+```
+
+
+
+### Refit  LR
+```{r , echo = FALSE}
+lasso_coef = as.matrix(  coef.glmnet(cvfit , s = cvfit$lambda.min)    )[-2]
+index = which( lasso_coef[-1] != 0 )
+after_lasso_full_19 = data19[, c(index,p) ]
+after_lasso_sub_19 = data_new_19[, c(index,p)]
+# counting = count_dataframe( after_lasso_full_19 , thres = 6)
+# factor_cols = counting$columns
+# factor_counts = counting$count
+# for ( j  in factor_cols )
+# {
+#   after_lasso_full_19[,j] = as.factor( after_lasso_full_19[ , j ])
+# }
+# 
+# lasso_var = paste( "interpolated_acetic","~" , paste( names(data_new_19)[index] , collapse = "+") )
+reg = lm( interpolated_acetic~.  , data = after_lasso_full_19)
+step_reg = step( reg )
+summary(step_reg)
+
+
+reg =  lm( interpolated_acetic~.  , data = after_lasso_sub_19)
+step_reg_sub = step( reg )
+summary(step_reg_sub)
+plot(step_reg_sub)
+```
+### Tree 
+```{r}
+treeTask = makeRegrTask(data = after_lasso_sub_19, target = "interpolated_acetic")
+tree = makeLearner("regr.rpart")
+
+```
+
+```{r}
+treeParamSpace = makeParamSet(
+makeIntegerParam("minsplit", lower = 5, upper = 20),
+makeIntegerParam("minbucket", lower = 3, upper = 10),
+makeNumericParam("cp", lower = 0.01, upper = 0.1),
+makeIntegerParam("maxdepth", lower = 3, upper = 10))
+```
+
+
+```{r}
+randSearch = makeTuneControlRandom(maxit = 200)
+cvForTuning = makeResampleDesc("CV", iters = 5)
+```
+
+```{r}
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+tunedTreePars = tuneParams(tree, task = treeTask,
+resampling = cvForTuning,
+par.set = treeParamSpace,
+control = randSearch)
+parallelStop()
+tunedTreePars
+```
+
+```{r}
+tunedTree = setHyperPars(tree, par.vals = tunedTreePars$x)
+tunedTreeModel = train(tunedTree, treeTask)
+```
+
+```{r}
+library(rpart.plot)
+treeModelData = getLearnerModel(tunedTreeModel)
+rpart.plot(treeModelData, roundint = FALSE,
+box.palette = "BuBn",
+type = 5)
+summary(treeModelData)
+```
+
+```{r}
+printcp(treeModelData, digits = 3)
+```
+### XGBoost
+```{r}
+xgb = makeLearner("regr.xgboost")
+xgbParamSpace = makeParamSet(
+makeNumericParam("eta", lower = 0, upper = 1),
+makeNumericParam("gamma", lower = 0, upper = 5),
+makeIntegerParam("max_depth", lower = 1, upper = 5),
+makeNumericParam("min_child_weight", lower = 1, upper = 10),
+makeNumericParam("subsample", lower = 0.5, upper = 1),
+makeNumericParam("colsample_bytree", lower = 0.5, upper = 1),
+makeIntegerParam("nrounds", lower = 20, upper = 20)
+)
+
+randSearch = makeTuneControlRandom(maxit = 1000)
+cvForTuning = makeResampleDesc("CV", iters = 5)
+tunedXgbPars = tuneParams(xgb, task = treeTask,
+resampling = cvForTuning,
+par.set = xgbParamSpace,
+control = randSearch)
+tunedXgbPars
+
+tunedXgb = setHyperPars(xgb, par.vals = tunedXgbPars$x)
+tunedXgbModel = train(tunedXgb, treeTask)
+xgbModelData = getLearnerModel(tunedXgbModel)
+```
+
+```{r}
+gr1 = xgboost::xgb.plot.tree(model = xgbModelData, trees = 1:5 ,  render =FALSE, show_node_id = TRUE)
+gr2 = xgboost::xgb.plot.multi.trees(xgbModelData , render = FALSE , show_node_id = TRUE )
+export_graph(gr1, 'tree_individual_sub.pdf',width=1500, height=5000)
+export_graph(gr2, 'tree_multi_sub.pdf', width=3500, height=4000)
+```
+
+## Benchmarking
+```{r}
+learners = list(makeLearner("regr.lm"),
+tunedTree,makeLearner("regr.svm"),tunedXgb)
+benchCV = makeResampleDesc("RepCV", folds = 5, reps = 5)
+bench = benchmark(learners, treeTask, benchCV)
+bench
+```
+
+### Simple Gam
+```{r}
+
+gam1 = gam( interpolated_acetic ~ ., data = after_lasso_full_19)
+summary( gam1 )
+plot(gam1)
+ 
+reg1 = lm(interpolated_acetic ~ ., data = after_lasso_full_19 )
+aov( gam1 , reg1)
+
+
+```
+
+```{r}
+data(airquality)
+g1 = gam(Ozone^(1/3) ~ lo(Solar.R) + lo(Wind, Temp), data=airquality, na=na.gam.replace)
+g2 = gam(Kyphosis ~ poly(Age,2) + s(Start), data=kyphosis, family=binomial, subset=Number>2)
+summary(g1)
+summary(g2)
+plot(g1)
+
+data(gam.data)
+Gam.object = gam(y ~ s(x,6) + s(z,6),data=gam.data)
+summary(Gam.object)
+plot(Gam.object,se=TRUE)
+```
+
+
+
+### Defining the task and wrappers
+
+```{r}
+gamTask = makeRegrTask(data = after_lasso_full_19, target = "interpolated_acetic")
+gamImputeWrapper = makeImputeWrapper("regr.gamboost")
+gamFeatSelControl = makeFeatSelControlSequential(method = "sfbs")
+kFold = makeResampleDesc("CV", iters = 2)
+gamFeatSelWrapper = makeFeatSelWrapper(learner = gamImputeWrapper,
+resampling = kFold,
+control = gamFeatSelControl)
+```
+
+### Cross-validating the GAM model-building process
+
+```{r}
+holdout = makeResampleDesc("Holdout")
+gamCV = resample(gamFeatSelWrapper, gamTask, resampling = holdout)
+gamCV
+```
+
+### Training a GAM
+
+```{r}
+library(parallel)
+library(parallelMap)
+parallelStartSocket(cpus = detectCores())
+gamModel = train(gamFeatSelWrapper, gamTask)
+parallelStop()
+gamModelData = getLearnerModel(gamModel, more.unwrap = TRUE)
+```
+
+### Plotting our GAM
+
+```{r}
+par(mfrow = c(3, 3))
+plot(gamModelData, type = "l")
+plot(gamModelData$fitted(), resid(gamModelData))
+qqnorm(resid(gamModelData))
+qqline(resid(gamModelData))
+par(mfrow = c(1, 1))
+
+```
+```{r}
+filterWrapperImp = makeFilterWrapper(learner = gamImputeWrapper,
+                                   fw.method = "linear.correlation")
+
+filterParam = makeParamSet(
+  makeIntegerParam("fw.abs", lower = 1, upper = 12)
+)
+
+gridSearch = makeTuneControlGrid()
+
+tuneWrapper = makeTuneWrapper(learner = filterWrapperImp,
+                               resampling = kFold,
+                               par.set = filterParam,
+                               control = gridSearch)
+
+filterGamCV = resample(tuneWrapper, gamTask, resampling = holdout)
+
+filterGamCV
+```

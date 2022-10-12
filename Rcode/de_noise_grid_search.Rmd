@@ -1,0 +1,224 @@
+---
+title: "de_noise"
+author: "Peian"
+date: "2022-08-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2_in_offgas" ) ] 
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+data19 = data19[,-c(3:4 , 51:57)]
+data_original = data19
+```
+
+### load the offline data
+```{r}
+offline = read.csv("C:/Users/85212/Desktop/Pro-data/joinacids.csv", header=TRUE)
+offline = dplyr:: filter( offline , EFT_H < 361)
+offline_time = offline$EFT_H
+off_data = c()
+x_out = data19$EFT_H
+nm = names(offline)
+for (j in 2:9)
+{
+  y = offline[,j]
+  index = complete.cases( y )
+  x = offline_time[index]
+  y = y[index]
+  interpolated = spline(x = x ,y = y , xout = x_out )$y
+  interpolated[ which(interpolated < 0) ] = 0
+  off_data = cbind( off_data , interpolated )
+}
+colnames(off_data) = names(offline)[2:9]
+off_data = as.data.frame( off_data )
+# join the offline data
+p = ncol(data19)
+data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+```
+
+
+### de-noise
+```{r}
+### de noise   ----------------------------------------------------------
+de_noise = function( data19 , thres = 6 ,  windows_size = 5 , sd_factor = 2 )
+{
+  p = ncol(data19)
+  cols = count_dataframe( data19 , thres = thres ) 
+  cols = cols$columns
+  temp = c(cols,p)
+  columns = c()
+  for ( i in 1:p)
+  {
+    if  ( length( intersect(i , temp) ) !=0 )
+    {
+      next
+    }
+    columns= c(columns , i )
+  }
+  nm = names(data19)
+  time = data19$EFT_H
+  for (j in columns)
+  {
+    if (nm[j] == "interpolated_acetic")
+    {
+      next
+    }
+    x = data19[,j]
+    std = sd(x)
+    difference = abs( diff(x) )
+    index_noise = which( difference > sd_factor *std )
+    for (i in (index_noise+1) ){
+      if ( i > windows_size  && i <= length(x) - windows_size - 1 )
+      {
+        estimate = mean_xt( x , i , windows_size)
+        x[i] = estimate
+        if (sum(is.na(x) > 0))
+          {
+            stop("has NULL value")
+            break
+          }
+      }
+    }
+    data19[,j] = x
+  }
+  return (data19)
+}
+
+```
+### denoise data
+```{r}
+p = ncol(data19)
+data_combine = cbind( data19[,-p] , off_data, interpolated_acetic =  data19[,p]  )
+denoise_original = cbind( de_noise( data19[,-p] ) ,interpolated_acetic = data19[,p] )
+denoise_combine =cbind(denoise_original[,-p] , off_data , interpolated_acetic= data19[,p])
+```
+
+
+
+### Select the closest
+```{r}
+set.seed(825)
+index = vector( len = nrow(ac19) )
+for ( i in 1:nrow(ac19) )
+{
+  index[i] = which( abs( ac19$EFT[i] - data19$EFT_H ) == min( abs(   ac19$EFT[i] - data19$EFT_H) ) )
+}
+```
+
+
+### final training
+```{r}
+final_train = function( train, test , cpu = detectCores() ,tuneLength = 2 , repeats = 2, folds = 3 , debug_wrappers = FALSE)
+{
+  set.seed(825)
+  total = repeats * folds 
+  result = c() ##  Record for performances
+  lambdaSearch = seq( 0, 1 , length.out = 30) 
+  lambdaSearch[2] = 1e-5   ## set a small number to check whether lasso works #
+  alphaSearch = seq(0,1, length.out = 10)
+  # Set the seeds
+  seeds = vector(mode = "list", length = total+1)
+  for(i in 1:total) seeds[[i]]= sample.int(n=10000, 1000 )
+  seeds[[ (total+1) ]]=sample.int(10000, 1)
+  # Set fitControl for the trControl
+  fitControl = trainControl( method = "repeatedcv", number = folds, repeats = repeats , search = "random" ,seed = seeds)
+  #fitControl = trainControl( method = "none" )
+  
+  # search grid
+  mars_grid = expand.grid( degree = 2:3,  nprune = floor( seq(30, (p-1), by = 1 ) ) )
+  lasso_grid = expand.grid( lambda = lambdaSearch , alpha = 0)
+  blasso_grid = expand.grid( lambda = lambdaSearch )
+  ridge_grid = expand.grid( lambda = lambdaSearch , alpha = 1 )
+  elastic_grid = expand.grid( lambda = lambdaSearch , alpha = alphaSearch )
+  m5_grid = expand.grid(pruned = c("Yes"), smoothed = c("Yes"), rules = c("Yes") ) 
+  # learners wrappers
+  lm = list( method = "lm" )
+  mars = list( method = 'earth' , tune_grid = mars_grid)
+  bagMars = list( method = 'bagEarth' )
+  adaBag = list( method = 'treebag')
+  cart = list( method = 'rpart')
+  xgbLinear = list( method = 'xgbLinear') 
+  xgb = list( method = 'xgbDART')
+  GpKernel = list( method = 'gaussprRadial')
+  knn = list( method = 'kknn')
+  pls = list( method = 'pls')
+  PolyKernelRLs = list( method = 'krlsPoly')
+  pcr = list( method = 'pcr')
+  rf = list( method = 'rf')
+  svmRadial = list( method = 'svmRadial')
+  lasso = list( method = 'glmnet' , tune_grid = lasso_grid)
+  ridge = list( method = 'glmnet' , tune_grid = ridge_grid)
+  elasticNet = list( method = 'glmnet' , tune_grid = elastic_grid)
+  wrappers = list( lm = lm,mars = mars,adaBag = adaBag,cart = cart,
+                   xgbLinear = xgbLinear,
+                   xgb = xgb,GpKernel = GpKernel,knn = knn, pls = pls ,
+                   PolyKernelRLs = PolyKernelRLs , pcr = pcr ,
+                   rf = rf, svmRadial = svmRadial ,
+                   lasso = lasso ,  ridge = ridge , elasticNet = elasticNet )
+  if (debug_wrappers == TRUE)
+  {
+    wrappers = list(lm=lm)
+  }
+  ### training
+  models = models_train( train , wrappers , fitControl , tuneLength ,test , cpu )
+  models_rmse = c()
+  models_mean_per_error = c()
+  for (model in models)
+  {
+    models_rmse = c( models_rmse , model$rmse)
+    models_mean_per_error = c( models_mean_per_error , model$mean_per_error )
+  }
+  names(models_rmse) = names(models)
+  names(models_mean_per_error) = names(models)
+  cat("rmse is ", mean(models_rmse) , "per_error is", mean(models_mean_per_error) ,"\n")
+  return ( list( rmse = models_rmse , percen_error = models_mean_per_error ) )
+}
+```
+
+
+## grid search for best denoise parameters
+```{r}
+sd_factors = seq(1.2,2,0.5)
+wd_sizes = seq(3,10, 4)
+final_res = matrix( rep(0, length(sd_factors)*length(wd_sizes) ) , 
+                    ncol = length(sd_factors) , nrow = length(wd_sizes) )
+for ( wd_size in wd_sizes )
+{
+  wd_index = which(wd_sizes == wd_size )
+  for (sd_factor in sd_factors)
+  {
+    sd_index = which( sd_factors == sd_factor )
+    denoise_combine = cbind( de_noise( data19[,-p] , windows_size = wd_size , sd_factor = sd_factor ) , off_data , interpolated_acetic= data19[,p])
+    train = denoise_combine[-index,]
+    test = denoise_combine[index,]
+    samples = sample(1:nrow(train) , size = 200 )
+    res = final_train( train[samples, ] , test , cpu = 16 , debug_wrappers = TRUE)
+    final_res[wd_index][sd_index] = mean(res$percen_error)
+  }
+}
+
+```
+
+
+
+```{r}
+rownames(final_res) = wd_sizes
+colnames(final_res) = sd_factors
+final_res
+write.csv(final_res, file ="grid_search.csv", row.names =TRUE , col.names = TRUE )
+```
+
+

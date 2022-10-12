@@ -1,0 +1,62 @@
+---
+title: "Setting_data_weights"
+author: "Peian"
+date: '2022-07-26'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+source( "data_loader.R" )
+temp = data_loader( Hour = 361)
+data19 = temp$data_19
+ac19 = temp$ac_19
+# removing  "pump.outlet"
+data19 = data19[ , -which(names(data19) == "O2_in_offgas" ) ] 
+nzv = nearZeroVar(data19, saveMetrics= TRUE)
+nzv = nearZeroVar(data19)
+data19 = data19[, -nzv]
+data19 = data19[,-c(53:59)]
+```
+
+### get weights
+```{r}
+# t is the input of EFT of online data; t_k is a sequence of EFT within offline data 
+
+get_single_weight = function( t , t_ofline) 
+{
+  weight = sum(  abs( t - t_ofline ) )
+  return (weight)
+}
+# input a sequence of t
+get_data_weights = function( t , t_ofline , scale = TRUE)
+{
+  weights = c()
+  for (i in 1:length(t) )
+  {
+    weight = 1 / get_single_weight( t[i] , t_ofline )
+    weights = c( weights , weight)
+  }
+  if (scale) 
+  {
+    weights = weights / sum( weights )
+  }
+  return (weights)
+}
+```
+# Test 
+```{r}
+weights = get_data_weights( data19$EFT_H , ac19$EFT )
+```
+
+
+```{r}
+
+```
+
+
+
+
